@@ -6,7 +6,7 @@
 import { buildStandardsPrompt } from "./standards.js";
 
 const CLOUD_CONFIG = {
-  url: "http://localhost:3001/api/review",
+  url: "https://codescan-server.onrender.com/api/review",
   model: "llama-3.3-70b-versatile",
   maxTokens: 4000,
 };
