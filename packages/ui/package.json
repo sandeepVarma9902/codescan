@@ -1,0 +1,16 @@
+{
+  "name": "@codescan/ui",
+  "version": "1.0.0",
+  "description": "Shared React UI components used by web, desktop, and mobile",
+  "main": "./src/index.jsx",
+  "exports": {
+    ".": "./src/index.jsx"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  },
+  "dependencies": {
+    "@codescan/core": "workspace:*"
+  }
+}

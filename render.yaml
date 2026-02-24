@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: codescan-proxy
+    runtime: node
+    rootDir: apps/web
+    buildCommand: pnpm install --prod
+    startCommand: node server.js
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false

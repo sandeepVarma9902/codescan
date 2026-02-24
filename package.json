@@ -1,0 +1,31 @@
+{
+  "name": "codescan",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI-powered code review tool — web, desktop, mobile, CLI & VS Code",
+  "packageManager": "pnpm@10.0.0",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:web": "turbo run dev --filter=@codescan/web",
+    "dev:desktop": "turbo run dev --filter=@codescan/desktop",
+    "dev:cli": "turbo run dev --filter=@codescan/cli",
+    "build": "turbo run build",
+    "build:web": "turbo run build --filter=@codescan/web",
+    "build:desktop": "turbo run build --filter=@codescan/desktop",
+    "build:mobile": "turbo run build --filter=@codescan/mobile",
+    "build:vscode": "turbo run build --filter=@codescan/vscode",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "clean": "turbo run clean"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["electron", "esbuild"]
+  },
+  "devDependencies": {
+    "turbo": "^1.13.0"
+  }
+}

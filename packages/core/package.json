@@ -1,0 +1,21 @@
+{
+  "name": "@codescan/core",
+  "version": "1.0.0",
+  "description": "Shared review engine — used by all apps",
+  "main": "./src/index.js",
+  "module": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./standards": "./src/standards.js",
+    "./languages": "./src/languages.js",
+    "./reviewer": "./src/reviewer.js",
+    "./types": "./src/types.js"
+  },
+  "scripts": {
+    "test": "node --test src/**/*.test.js",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}

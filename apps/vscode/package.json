@@ -1,0 +1,48 @@
+{
+  "name": "@codescan/vscode",
+  "displayName": "CodeScan — AI Code Review",
+  "description": "AI-powered code review inside VS Code. Supports 40+ languages.",
+  "version": "1.0.0",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Linters", "Other"],
+  "activationEvents": ["onLanguage"],
+  "main": "./src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "codescan.reviewFile",
+        "title": "CodeScan: Review This File"
+      },
+      {
+        "command": "codescan.reviewSelection",
+        "title": "CodeScan: Review Selected Code"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        { "command": "codescan.reviewFile",      "group": "codescan" },
+        { "command": "codescan.reviewSelection", "group": "codescan", "when": "editorHasSelection" }
+      ]
+    },
+    "configuration": {
+      "title": "CodeScan",
+      "properties": {
+        "codescan.apiKey":    { "type": "string",  "description": "Anthropic API key" },
+        "codescan.mode":      { "type": "string",  "default": "auto", "enum": ["auto","cloud","local"] },
+        "codescan.standards": { "type": "array",   "default": ["solid","null_safety","error_handling","clean_code"] },
+        "codescan.localModel":{ "type": "string",  "default": "deepseek-coder" }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.js --bundle --outfile=dist/extension.js --external:vscode --platform=node",
+    "dev":   "npm run build -- --watch"
+  },
+  "dependencies": {
+    "@codescan/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.19.0"
+  }
+}

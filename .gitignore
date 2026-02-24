@@ -1,0 +1,32 @@
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Build outputs
+dist
+out
+build
+.next
+.turbo
+
+# Electron
+apps/desktop/release
+
+# VS Code extension
+apps/vscode/*.vsix
+
+# Mobile
+apps/mobile/android
+apps/mobile/ios
+apps/mobile/.capacitor
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Editor
+.DS_Store
+*.log
+.vscode/settings.json
