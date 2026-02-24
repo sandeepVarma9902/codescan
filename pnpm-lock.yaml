@@ -158,11 +158,7 @@ importers:
         specifier: ^5.0.0
         version: 5.4.21(@types/node@25.3.0)
 
-  packages/core:
-    dependencies:
-      node-fetch:
-        specifier: ^3.3.2
-        version: 3.3.2
+  packages/core: {}
 
   packages/ui:
     dependencies:
