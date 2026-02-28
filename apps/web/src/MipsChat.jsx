@@ -1,11 +1,6 @@
 /**
- * MipsChat.jsx — MIPS Expert with PDF RAG
- * 
- * Flow:
- * 1. User enters Measure ID + Year
- * 2. Server downloads official CMS PDF
- * 3. PDF text extracted and returned
- * 4. AI reads ACTUAL spec text → accurate answers
+ * MipsChat.jsx — Full-screen chat, mobile-first
+ * Measure selector collapses into a top bar after loading
  */
 
 import { useState, useRef, useEffect } from "react";
@@ -13,22 +8,24 @@ import { useState, useRef, useEffect } from "react";
 const SERVER = "https://codescan-server.onrender.com";
 const YEARS  = ["2026", "2025", "2024", "2023", "2022"];
 
-const SUGGESTED_QUESTIONS = [
+const QUICK_QUESTIONS = [
   "Is this patient eligible for the denominator?",
-  "Do I look at previous visits or only the current visit?",
-  "What ICD-10 codes qualify for the denominator?",
+  "Previous visits or current visit only?",
+  "What ICD-10 codes qualify?",
   "What CPT codes trigger this measure?",
-  "What must be documented to meet the numerator?",
+  "What must be documented for the numerator?",
   "What are the exclusion criteria?",
-  "How is the performance rate calculated?",
+  "How is performance rate calculated?",
   "What changed from last year?",
-  "Does this require data from the entire performance period?",
+  "Full performance period or single visit?",
   "What are the reporting requirements?",
 ];
 
 export default function MipsChat() {
   const [measureId, setMeasureId]     = useState("");
   const [year, setYear]               = useState("2025");
+  const [draftId, setDraftId]         = useState("");
+  const [draftYear, setDraftYear]     = useState("2025");
   const [question, setQuestion]       = useState("");
   const [messages, setMessages]       = useState([]);
   const [loading, setLoading]         = useState(false);
@@ -37,7 +34,11 @@ export default function MipsChat() {
   const [specLoaded, setSpecLoaded]   = useState(false);
   const [specError, setSpecError]     = useState(null);
   const [error, setError]             = useState(null);
+  const [showSelector, setShowSelector] = useState(true);  // false = collapsed top bar
+  const [showChangeModal, setShowChangeModal] = useState(false);
+  const [showQuickQ, setShowQuickQ]   = useState(false);
   const messagesEndRef                = useRef(null);
+  const inputRef                      = useRef(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -45,46 +46,56 @@ export default function MipsChat() {
 
   // ── Load CMS PDF ──────────────────────────────────────────────────────────
 
-  const loadSpec = async () => {
-    if (!measureId.trim()) return;
+  const loadSpec = async (id, yr) => {
+    const targetId = id || draftId;
+    const targetYear = yr || draftYear;
+    if (!targetId.trim()) return;
+
     setLoadingSpec(true);
     setSpecError(null);
     setPdfData(null);
     setSpecLoaded(false);
-    setMessages([]);
+    setShowChangeModal(false);
+
+    // If this is a change, add a system message to chat
+    if (specLoaded) {
+      setMessages(prev => [...prev, {
+        role: "system",
+        displayContent: `Switching to MIPS #${targetId} (${targetYear})...`,
+        timestamp: new Date().toLocaleTimeString(),
+      }]);
+    }
 
     try {
-      const res = await fetch(`${SERVER}/api/cms/measure/${year}/${measureId.trim()}`);
+      const res = await fetch(`${SERVER}/api/cms/measure/${targetYear}/${targetId.trim()}`);
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || `Server error ${res.status}`);
-      }
+      if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
 
       setPdfData(data);
+      setMeasureId(targetId.trim());
+      setYear(targetYear);
       setSpecLoaded(true);
+      setShowSelector(false); // collapse to top bar
 
-      // Show what we extracted from the PDF
-      const sections = data.sections || {};
-      const title = sections.measureTitle || `MIPS Measure #${measureId}`;
-      const hasGoodData = data.pageCount > 0 && data.charCount > 500;
+      const title = data.sections?.measureTitle || `MIPS Measure #${targetId}`;
+      const hasData = data.pageCount > 0 && data.charCount > 500;
 
-      setMessages([{
+      setMessages(prev => [...prev, {
         role: "assistant",
-        displayContent: hasGoodData
-          ? `✅ **Official CMS PDF loaded for MIPS #${measureId} (${year})**\n\n**${title}**\n\n📄 ${data.pageCount} pages · ${(data.charCount / 1000).toFixed(1)}K characters extracted\n🌐 Source: ${data.pdfUrl}\n${data.cached ? "📦 Served from cache" : "🔄 Freshly downloaded"}\n\nI'm reading directly from the official CMS specification document. Ask me anything about this measure — my answers will be based on the actual PDF content.`
-          : `⚠️ PDF loaded but with limited content for MIPS #${measureId} (${year}). I'll answer based on available data.`,
+        displayContent: hasData
+          ? `✅ **MIPS #${targetId} loaded (${targetYear})**\n\n**${title}**\n\n📄 ${data.pageCount} pages · ${(data.charCount/1000).toFixed(1)}K chars from official CMS PDF\n\nAsk me anything — I'm reading from the actual specification document.`
+          : `⚠️ **MIPS #${targetId} (${targetYear})** — limited data returned. I'll answer from my training knowledge and flag any uncertainty.`,
         timestamp: new Date().toLocaleTimeString(),
         isSystem: true,
       }]);
 
     } catch (e) {
-      const msg = e.message;
       setSpecError(
-        msg.includes("fetch") ? "Server is waking up — wait 30 seconds and try again." :
-        msg.includes("not found") ? `Measure #${measureId} PDF not found for ${year}. Check the measure ID is correct.` :
-        msg
+        e.message.includes("fetch") ? "Server waking up — wait 30s and try again." :
+        e.message.includes("not found") ? `Measure #${targetId} not found for ${targetYear}.` :
+        e.message
       );
+      setShowSelector(true);
     } finally {
       setLoadingSpec(false);
     }
@@ -95,6 +106,7 @@ export default function MipsChat() {
   const sendMessage = async (q) => {
     if (!q.trim() || !specLoaded || !pdfData) return;
     setError(null);
+    setShowQuickQ(false);
 
     const userMsg = { role: "user", displayContent: q, timestamp: new Date().toLocaleTimeString() };
     const updated = [...messages, userMsg];
@@ -104,48 +116,28 @@ export default function MipsChat() {
 
     try {
       const sections = pdfData.sections || {};
-
-      // Build rich context from the actual PDF
       const pdfContext = `
 === OFFICIAL CMS MIPS MEASURE SPECIFICATION ===
 Source: ${pdfData.pdfUrl}
-Downloaded: ${pdfData.fetchedAt}
-Pages: ${pdfData.pageCount} | Size: ${pdfData.charCount} characters
+Fetched: ${pdfData.fetchedAt}
 
-${sections.measureTitle  ? `MEASURE TITLE:\n${sections.measureTitle}\n` : ""}
-${sections.measureType   ? `MEASURE TYPE:\n${sections.measureType}\n` : ""}
-${sections.description   ? `DESCRIPTION:\n${sections.description}\n` : ""}
-${sections.submissionMethods ? `SUBMISSION METHODS:\n${sections.submissionMethods}\n` : ""}
-${sections.denominator   ? `DENOMINATOR:\n${sections.denominator}\n` : ""}
-${sections.denominatorNote ? `DENOMINATOR NOTE:\n${sections.denominatorNote}\n` : ""}
-${sections.numerator     ? `NUMERATOR:\n${sections.numerator}\n` : ""}
-${sections.exclusions    ? `EXCLUSIONS:\n${sections.exclusions}\n` : ""}
-${sections.exceptions    ? `EXCEPTIONS:\n${sections.exceptions}\n` : ""}
+${sections.measureTitle     ? `TITLE: ${sections.measureTitle}`           : ""}
+${sections.measureType      ? `TYPE: ${sections.measureType}`             : ""}
+${sections.description      ? `DESCRIPTION: ${sections.description}`      : ""}
+${sections.submissionMethods? `SUBMISSION: ${sections.submissionMethods}` : ""}
+${sections.denominator      ? `DENOMINATOR: ${sections.denominator}`      : ""}
+${sections.denominatorNote  ? `DENOMINATOR NOTE: ${sections.denominatorNote}` : ""}
+${sections.numerator        ? `NUMERATOR: ${sections.numerator}`          : ""}
+${sections.exclusions       ? `EXCLUSIONS: ${sections.exclusions}`        : ""}
+${sections.exceptions       ? `EXCEPTIONS: ${sections.exceptions}`        : ""}
 
-=== FULL PDF TEXT (first 12000 chars) ===
-${pdfData.fullText || ""}
-      `.trim();
+=== FULL PDF TEXT ===
+${pdfData.fullText || ""}`.trim();
 
-      const systemPrompt = `You are a MIPS expert consultant for a US EHR application (HIPAA compliant).
-
-You have the COMPLETE official CMS specification document for MIPS Measure #${measureId} (${year} Performance Year) extracted directly from the CMS PDF.
-
-${pdfContext}
-
-Rules for answering:
-- Answer ONLY from the PDF content above — do not guess or use outside knowledge
-- Be specific: quote exact CPT/ICD-10 codes from the document when relevant
-- For denominator questions: state clearly YES/NO/MAYBE with exact criteria from the PDF
-- For numerator: state exactly what must be documented
-- For performance period: state exactly what the PDF says about lookback periods
-- If something is NOT in the PDF, say "The specification does not address this — check qpp.cms.gov"
-- Keep answers concise and actionable — providers are busy
-- Flag any HIPAA documentation requirements you find in the spec`;
-
-      const conversationMessages = [
-        { role: "user",      content: systemPrompt },
-        { role: "assistant", content: `Understood. I have read the complete ${pdfData.pageCount}-page CMS specification for MIPS #${measureId} (${year}). I will answer strictly from the PDF content. Ready for questions.` },
-        ...updated.slice(1).map(m => ({
+      const msgs = [
+        { role: "user", content: `You are a MIPS expert for a US EHR application (HIPAA compliant).\n\nOfficial CMS spec for MIPS #${measureId} (${year}):\n\n${pdfContext}\n\nAnswer from the PDF only. Be specific — quote exact codes. State YES/NO/MAYBE for eligibility. Keep answers concise. If not in PDF, say so clearly.` },
+        { role: "assistant", content: `Understood. I have the ${pdfData.pageCount}-page CMS spec for MIPS #${measureId} (${year}). Ready.` },
+        ...updated.filter(m => m.role !== "system").slice(1).map(m => ({
           role: m.role === "assistant" ? "assistant" : "user",
           content: m.displayContent,
         }))
@@ -154,229 +146,272 @@ Rules for answering:
       const res = await fetch(`${SERVER}/api/review`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "llama-3.3-70b-versatile", max_tokens: 1200, messages: conversationMessages }),
+        body: JSON.stringify({ model: "llama-3.3-70b-versatile", max_tokens: 1200, messages: msgs }),
       });
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err?.error?.message || `Server error ${res.status}`);
-      }
-
+      if (!res.ok) throw new Error((await res.json().catch(()=>({}))).error?.message || `Error ${res.status}`);
       const data = await res.json();
-      const text = data.content?.map(c => c.text || "").join("") || "";
+      const text = data.content?.map(c => c.text||"").join("") || "";
 
-      setMessages(prev => [...prev, {
-        role: "assistant",
-        displayContent: text,
-        timestamp: new Date().toLocaleTimeString(),
-      }]);
-
+      setMessages(prev => [...prev, { role:"assistant", displayContent:text, timestamp:new Date().toLocaleTimeString() }]);
     } catch (e) {
-      setError(e.message.includes("fetch") ? "Server is waking up — try again in 30 seconds." : e.message);
-      setMessages(prev => prev.slice(0, -1));
+      setError(e.message.includes("fetch") ? "Server waking up — try again in 30s." : e.message);
+      setMessages(prev => prev.slice(0,-1));
     } finally {
       setLoading(false);
     }
   };
 
   const fmt = (text) => text.split('\n').map((line, i) => {
-    if (!line.trim()) return <div key={i} style={{ height: 6 }} />;
-    if (line.startsWith('## '))  return <div key={i} style={{ fontSize: 14, fontWeight: 800, color: "#e2e8f0", marginTop: 14, marginBottom: 4, fontFamily: "'Syne',sans-serif" }}>{line.slice(3)}</div>;
-    if (line.startsWith('# '))   return <div key={i} style={{ fontSize: 15, fontWeight: 800, color: "#4db8ff", marginTop: 14, marginBottom: 6, fontFamily: "'Syne',sans-serif" }}>{line.slice(2)}</div>;
-    if (line.startsWith('**') && line.endsWith('**')) return <div key={i} style={{ fontWeight: 700, color: "#e2e8f0", marginTop: 8, fontSize: 13 }}>{line.replace(/\*\*/g, '')}</div>;
-    if (line.startsWith('- ') || line.startsWith('• ')) return <div key={i} style={{ paddingLeft: 14, marginBottom: 3, color: "#c9d1d9", fontSize: 13, lineHeight: 1.6 }}>· {line.slice(2)}</div>;
-    if (line.match(/^\d+\./)) return <div key={i} style={{ paddingLeft: 14, marginBottom: 3, color: "#c9d1d9", fontSize: 13 }}>{line}</div>;
+    if (!line.trim()) return <div key={i} style={{ height:5 }} />;
+    if (line.startsWith('## ')) return <div key={i} style={{ fontSize:14, fontWeight:700, color:"#e2e8f0", marginTop:12, marginBottom:3, fontFamily:"'Bricolage Grotesque',sans-serif" }}>{line.slice(3)}</div>;
+    if (line.startsWith('**') && line.endsWith('**')) return <div key={i} style={{ fontWeight:700, color:"#e2e8f0", marginTop:6, fontSize:13 }}>{line.replace(/\*\*/g,'')}</div>;
+    if (line.startsWith('- ') || line.startsWith('• ')) return <div key={i} style={{ paddingLeft:12, marginBottom:3, color:"#c9d1d9", fontSize:13, lineHeight:1.6 }}>· {line.slice(2)}</div>;
     const html = line
-      .replace(/\*\*([^*]+)\*\*/g, '<strong style="color:#e2e8f0">$1</strong>')
-      .replace(/\b([A-Z]\d{2}\.?\d*[A-Z0-9]*)\b/g, '<code style="background:rgba(77,184,255,0.1);color:#4db8ff;padding:1px 5px;border-radius:3px;font-size:11px">$1</code>')
-      .replace(/\b(\d{5})\b/g, '<code style="background:rgba(168,85,247,0.1);color:#a855f7;padding:1px 5px;border-radius:3px;font-size:11px">$1</code>');
-    return <div key={i} style={{ color: "#a0aec0", fontSize: 13, lineHeight: 1.7, marginBottom: 2 }} dangerouslySetInnerHTML={{ __html: html }} />;
+      .replace(/\*\*([^*]+)\*\*/g, '<strong style="color:#e2e8f0;font-weight:700">$1</strong>')
+      .replace(/\b([A-Z]\d{2}\.?\d*[A-Z0-9]*)\b/g, '<code style="background:rgba(6,182,212,0.12);color:#22d3ee;padding:1px 5px;border-radius:4px;font-size:11px;font-family:DM Mono,monospace">$1</code>')
+      .replace(/\b(\d{5})\b/g,                      '<code style="background:rgba(99,102,241,0.12);color:#818cf8;padding:1px 5px;border-radius:4px;font-size:11px;font-family:DM Mono,monospace">$1</code>');
+    return <div key={i} style={{ color:"#9ca3af", fontSize:13, lineHeight:1.75, marginBottom:2 }} dangerouslySetInnerHTML={{ __html:html }} />;
   });
 
   return (
-    <div style={{ display: "flex", height: "calc(100vh - 115px)", fontFamily: "'JetBrains Mono',monospace" }}>
+    <div style={{ display:"flex", flexDirection:"column", height:"calc(100vh - 65px)", background:"#07080f", fontFamily:"'DM Sans',sans-serif", position:"relative" }}>
       <style>{`
-        .mi { background:#0d0d15; border:1px solid #1e1e2e; color:#e2e8f0; padding:9px 12px;
-          border-radius:6px; font-family:'JetBrains Mono',monospace; font-size:13px; outline:none; }
-        .mi:focus { border-color:rgba(77,184,255,0.4); }
-        .load-btn { background:linear-gradient(135deg,#4ade80,#22d3ee); border:none; color:#0a0a0f;
-          padding:10px; border-radius:6px; cursor:pointer; font-family:'Syne',sans-serif;
-          font-weight:800; font-size:12px; width:100%; transition:all 0.2s; }
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono&family=Bricolage+Grotesque:wght@700;800&display=swap');
+        .mi { background:#0d0f1a; border:1.5px solid #1e2030; color:#e2e8f0; padding:12px 14px; border-radius:10px; font-family:'DM Sans',sans-serif; font-size:15px; outline:none; width:100%; }
+        .mi:focus { border-color:rgba(6,182,212,0.5); }
+        .load-btn { background:linear-gradient(135deg,#06b6d4,#6366f1); border:none; color:white; padding:16px; border-radius:12px; cursor:pointer; font-family:'Bricolage Grotesque',sans-serif; font-weight:800; font-size:16px; width:100%; transition:all 0.2s; min-height:54px; }
         .load-btn:disabled { opacity:0.4; cursor:not-allowed; }
-        .send-btn { background:linear-gradient(135deg,#4db8ff,#a855f7); border:none; color:white;
-          padding:10px 20px; border-radius:6px; cursor:pointer; font-family:'Syne',sans-serif;
-          font-weight:800; font-size:13px; transition:all 0.2s; }
+        .send-btn { background:linear-gradient(135deg,#06b6d4,#6366f1); border:none; color:white; width:48px; height:48px; border-radius:12px; cursor:pointer; font-size:20px; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:all 0.2s; }
         .send-btn:disabled { opacity:0.4; cursor:not-allowed; }
-        .chip { padding:5px 10px; border-radius:20px; border:1px solid #1e1e2e; background:rgba(255,255,255,0.02);
-          color:#555; font-size:11px; cursor:pointer; transition:all 0.15s; text-align:left; width:100%; margin-bottom:4px; }
-        .chip:hover { border-color:rgba(77,184,255,0.3); color:#4db8ff; }
-        .chip:disabled { opacity:0.3; cursor:not-allowed; }
+        .quick-chip { padding:10px 16px; border-radius:20px; border:1.5px solid #1e2030; background:rgba(255,255,255,0.02); color:#6b7280; font-size:13px; cursor:pointer; transition:all 0.15s; white-space:nowrap; font-family:'DM Sans',sans-serif; }
+        .quick-chip:hover { border-color:rgba(6,182,212,0.4); color:#22d3ee; }
         .spin { animation:spin 1s linear infinite; display:inline-block; }
         @keyframes spin { to { transform:rotate(360deg); } }
         .fade { animation:fi 0.3s ease-out; }
-        @keyframes fi { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+        @keyframes fi { from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;} }
+        .typing-dot { width:7px; height:7px; border-radius:50%; background:#374151; animation:bounce 1.2s infinite; }
+        .typing-dot:nth-child(2){animation-delay:0.2s;}
+        .typing-dot:nth-child(3){animation-delay:0.4s;}
+        @keyframes bounce { 0%,60%,100%{transform:translateY(0);} 30%{transform:translateY(-6px);} }
+        .overlay { position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:200; display:flex; align-items:flex-end; }
+        .modal { background:#0d0f1a; border:1.5px solid #1e2030; border-radius:20px 20px 0 0; padding:24px; width:100%; }
       `}</style>
 
-      {/* ── Left Panel ── */}
-      <div style={{ width: 300, borderRight: "1px solid #1a1a2e", display: "flex", flexDirection: "column", background: "#0d0d15", flexShrink: 0 }}>
+      {/* ── TOP BAR ── */}
+      {showSelector ? (
+        /* SETUP SCREEN — measure not loaded yet */
+        <div style={{ flex:1, overflowY:"auto", padding:"24px 20px 100px" }}>
+          <div style={{ maxWidth:480, margin:"0 auto" }}>
+            <div style={{ textAlign:"center", marginBottom:32 }}>
+              <div style={{ fontSize:52, marginBottom:12 }}>🏥</div>
+              <div style={{ fontFamily:"'Bricolage Grotesque',sans-serif", fontSize:24, fontWeight:800, color:"#e2e8f0", marginBottom:8 }}>
+                MIPS Expert
+              </div>
+              <div style={{ fontSize:14, color:"#4b5563", lineHeight:1.7 }}>
+                Enter a measure ID and year to load the official CMS specification. I'll read the full PDF and answer your questions from the actual document.
+              </div>
+            </div>
 
-        <div style={{ padding: 16, borderBottom: "1px solid #1a1a2e" }}>
-          <div style={{ fontSize: 10, color: "#4db8ff", letterSpacing: "2px", textTransform: "uppercase", marginBottom: 14, fontWeight: 600 }}>
-            🏥 MIPS Measure Lookup
-          </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+              <div>
+                <div style={{ fontSize:11, color:"#4b5563", textTransform:"uppercase", letterSpacing:"1.5px", marginBottom:8, fontWeight:600 }}>Measure ID</div>
+                <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                  <span style={{ color:"#22d3ee", fontSize:22, fontWeight:800, fontFamily:"'Bricolage Grotesque',sans-serif" }}>#</span>
+                  <input className="mi" value={draftId} placeholder="e.g. 130"
+                    onChange={e => setDraftId(e.target.value.replace(/\D/g,""))}
+                    onKeyDown={e => e.key==="Enter" && loadSpec()} style={{ fontSize:20, fontWeight:700 }} />
+                </div>
+              </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 10, color: "#555", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 5 }}>Measure ID</div>
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <span style={{ color: "#4db8ff", fontWeight: 700, fontSize: 16 }}>#</span>
-              <input className="mi" value={measureId} placeholder="e.g. 130"
-                onChange={e => setMeasureId(e.target.value.replace(/\D/g, ""))}
-                onKeyDown={e => e.key === "Enter" && loadSpec()}
-                style={{ flex: 1 }} />
+              <div>
+                <div style={{ fontSize:11, color:"#4b5563", textTransform:"uppercase", letterSpacing:"1.5px", marginBottom:8, fontWeight:600 }}>Performance Year</div>
+                <select className="mi" value={draftYear} onChange={e => setDraftYear(e.target.value)} style={{ fontSize:16 }}>
+                  {YEARS.map(y => <option key={y}>{y}</option>)}
+                </select>
+              </div>
+
+              {specError && (
+                <div style={{ background:"rgba(248,113,113,0.08)", border:"1.5px solid rgba(248,113,113,0.2)", borderRadius:12, padding:"12px 16px", color:"#f87171", fontSize:13 }}>
+                  ⚠️ {specError}
+                </div>
+              )}
+
+              <button className="load-btn" onClick={() => loadSpec()} disabled={!draftId.trim() || loadingSpec}>
+                {loadingSpec ? <><span className="spin">⚡</span> Downloading CMS PDF...</> : "📄 Load Measure Spec"}
+              </button>
+
+              {/* Common measure IDs hint */}
+              <div style={{ marginTop:8 }}>
+                <div style={{ fontSize:11, color:"#374151", marginBottom:10, textTransform:"uppercase", letterSpacing:"1px" }}>Common Measures</div>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                  {[["001","Diabetes HbA1c"],["130","Documentation"],["226","Tobacco"],["236","Control HTN"],["317","Prev Care"]].map(([id,label]) => (
+                    <button key={id} onClick={() => { setDraftId(id); }}
+                      style={{ padding:"8px 14px", borderRadius:20, border:"1.5px solid #1e2030", background: draftId===id?"rgba(6,182,212,0.12)":"rgba(255,255,255,0.02)", color:draftId===id?"#22d3ee":"#4b5563", fontSize:12, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", transition:"all 0.15s" }}>
+                      #{id} {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
+        </div>
 
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 10, color: "#555", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 5 }}>Performance Year</div>
-            <select className="mi" value={year} onChange={e => setYear(e.target.value)} style={{ width: "100%" }}>
-              {YEARS.map(y => <option key={y}>{y}</option>)}
-            </select>
+      ) : (
+        /* CHAT MODE — measure loaded */
+        <>
+          {/* Compact measure bar */}
+          <div style={{ padding:"12px 16px", borderBottom:"1px solid #1a1c2e", background:"#0d0f1a", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <div style={{ width:36, height:36, borderRadius:10, background:"linear-gradient(135deg,#06b6d4,#6366f1)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:16 }}>🏥</div>
+              <div>
+                <div style={{ fontFamily:"'Bricolage Grotesque',sans-serif", fontSize:14, fontWeight:800, color:"#e2e8f0" }}>
+                  MIPS #{measureId}
+                </div>
+                <div style={{ fontSize:11, color:"#4b5563" }}>
+                  {year} · {pdfData?.pageCount}p · {(pdfData?.charCount/1000).toFixed(1)}K chars
+                  {pdfData?.cached && " · 📦 cached"}
+                </div>
+              </div>
+            </div>
+            <button onClick={() => { setShowChangeModal(true); setDraftId(measureId); setDraftYear(year); }}
+              style={{ padding:"8px 14px", borderRadius:8, border:"1.5px solid #1e2030", background:"transparent", color:"#4b5563", fontSize:12, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", fontWeight:600 }}>
+              Change ↗
+            </button>
           </div>
 
-          <button className="load-btn" onClick={loadSpec} disabled={!measureId.trim() || loadingSpec}>
-            {loadingSpec
-              ? <><span className="spin">⚡</span> Downloading CMS PDF...</>
-              : "📄 Load Official CMS PDF"
-            }
-          </button>
+          {/* Chat messages */}
+          <div style={{ flex:1, overflowY:"auto", padding:"16px", display:"flex", flexDirection:"column", gap:12, paddingBottom:8 }}>
 
-          {specError && (
-            <div style={{ marginTop: 10, fontSize: 11, color: "#ff4d4d", background: "rgba(255,77,77,0.08)", border: "1px solid rgba(255,77,77,0.15)", borderRadius: 6, padding: "8px 10px" }}>
-              ⚠️ {specError}
+            {messages.map((msg, i) => {
+              if (msg.role === "system") return (
+                <div key={i} style={{ textAlign:"center", fontSize:11, color:"#374151", padding:"4px 0" }}>— {msg.displayContent} —</div>
+              );
+
+              return (
+                <div key={i} className="fade" style={{ display:"flex", flexDirection:msg.role==="user"?"row-reverse":"row", gap:8, alignItems:"flex-end" }}>
+                  {msg.role === "assistant" && (
+                    <div style={{ width:28, height:28, borderRadius:8, background:"rgba(6,182,212,0.12)", border:"1px solid rgba(6,182,212,0.2)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, flexShrink:0, marginBottom:4 }}>🏥</div>
+                  )}
+                  <div style={{
+                    maxWidth:"82%",
+                    background: msg.role==="user" ? "linear-gradient(135deg,#06b6d4,#6366f1)" : msg.isSystem ? "rgba(74,222,128,0.06)" : "#111827",
+                    border: msg.role!=="user" ? `1px solid ${msg.isSystem?"rgba(74,222,128,0.18)":"#1e2030"}` : "none",
+                    borderRadius: msg.role==="user" ? "18px 18px 4px 18px" : "4px 18px 18px 18px",
+                    padding: "12px 16px",
+                  }}>
+                    {msg.role==="user"
+                      ? <div style={{ color:"white", fontSize:14, lineHeight:1.6 }}>{msg.displayContent}</div>
+                      : <div>{fmt(msg.displayContent)}</div>
+                    }
+                    <div style={{ fontSize:9, color:msg.role==="user"?"rgba(255,255,255,0.4)":"#1f2937", marginTop:6, textAlign:msg.role==="user"?"right":"left" }}>
+                      {msg.timestamp}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Typing indicator */}
+            {loading && (
+              <div style={{ display:"flex", gap:8, alignItems:"flex-end" }}>
+                <div style={{ width:28, height:28, borderRadius:8, background:"rgba(6,182,212,0.12)", border:"1px solid rgba(6,182,212,0.2)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, flexShrink:0 }}>🏥</div>
+                <div style={{ background:"#111827", border:"1px solid #1e2030", borderRadius:"4px 18px 18px 18px", padding:"14px 18px", display:"flex", gap:6, alignItems:"center" }}>
+                  <div className="typing-dot" /><div className="typing-dot" /><div className="typing-dot" />
+                </div>
+              </div>
+            )}
+
+            {error && (
+              <div style={{ background:"rgba(248,113,113,0.08)", border:"1px solid rgba(248,113,113,0.2)", borderRadius:12, padding:"10px 14px", color:"#f87171", fontSize:13 }}>⚠️ {error}</div>
+            )}
+
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Quick questions strip */}
+          {showQuickQ && (
+            <div style={{ padding:"8px 16px", borderTop:"1px solid #1a1c2e", overflowX:"auto", display:"flex", gap:8 }}>
+              {QUICK_QUESTIONS.map((q,i) => (
+                <button key={i} className="quick-chip" onClick={() => sendMessage(q)}>{q}</button>
+              ))}
             </div>
           )}
-        </div>
 
-        {/* PDF Info */}
-        {pdfData && (
-          <div style={{ padding: 16, borderBottom: "1px solid #1a1a2e" }} className="fade">
-            <div style={{ fontSize: 10, color: "#4ade80", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 10, fontWeight: 600 }}>
-              ✅ PDF Loaded
+          {/* Input bar */}
+          <div style={{ padding:"12px 16px", borderTop:"1px solid #1a1c2e", background:"#07080f", paddingBottom:"calc(12px + env(safe-area-inset-bottom))" }}>
+            <div style={{ display:"flex", gap:8, alignItems:"flex-end" }}>
+              {/* Quick Q toggle */}
+              <button onClick={() => setShowQuickQ(!showQuickQ)}
+                style={{ width:48, height:48, borderRadius:12, border:"1.5px solid", borderColor:showQuickQ?"rgba(6,182,212,0.5)":"#1e2030", background:showQuickQ?"rgba(6,182,212,0.08)":"transparent", color:showQuickQ?"#22d3ee":"#374151", fontSize:20, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                💡
+              </button>
+
+              <textarea ref={inputRef} className="mi" value={question}
+                onChange={e => setQuestion(e.target.value)}
+                onKeyDown={e => { if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(question); } }}
+                placeholder="Ask about this measure..."
+                rows={1} style={{ resize:"none", lineHeight:1.6, padding:"12px 14px", minHeight:48, maxHeight:120, overflowY:"auto" }}
+                onInput={e => { e.target.style.height="auto"; e.target.style.height=Math.min(e.target.scrollHeight,120)+"px"; }}
+              />
+
+              <button className="send-btn" onClick={() => sendMessage(question)} disabled={loading || !question.trim()}>
+                {loading ? <span className="spin" style={{ fontSize:16 }}>⚡</span> : "→"}
+              </button>
             </div>
-            {[
-              ["Title",   pdfData.sections?.measureTitle?.slice(0, 60)],
-              ["Type",    pdfData.sections?.measureType],
-              ["Pages",   pdfData.pageCount + " pages"],
-              ["Size",    (pdfData.charCount / 1000).toFixed(1) + "K chars extracted"],
-              ["Status",  pdfData.cached ? "📦 Cached (fast)" : "🌐 Fresh download"],
-            ].filter(([, v]) => v).map(([l, v]) => (
-              <div key={l} style={{ marginBottom: 6 }}>
-                <div style={{ fontSize: 9, color: "#333", textTransform: "uppercase", letterSpacing: "1px" }}>{l}</div>
-                <div style={{ fontSize: 11, color: "#a0aec0", lineHeight: 1.4 }}>{v}</div>
-              </div>
-            ))}
-            <a href={pdfData.pdfUrl} target="_blank" rel="noreferrer"
-              style={{ fontSize: 10, color: "#4db8ff", textDecoration: "none", marginTop: 6, display: "block" }}>
-              📎 View original PDF →
-            </a>
           </div>
-        )}
+        </>
+      )}
 
-        {/* Suggested Questions */}
-        <div style={{ flex: 1, padding: 16, overflowY: "auto" }}>
-          <div style={{ fontSize: 10, color: "#333", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>Quick Questions</div>
-          {SUGGESTED_QUESTIONS.map((q, i) => (
-            <button key={i} className="chip" onClick={() => setQuestion(q)} disabled={!specLoaded}>{q}</button>
-          ))}
-        </div>
-      </div>
-
-      {/* ── Right Chat Panel ── */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-
-        <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
-
-          {messages.length === 0 && (
-            <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, opacity: 0.4 }}>
-              <div style={{ fontSize: 52 }}>🏥</div>
-              <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 22, fontWeight: 800, color: "#e2e8f0" }}>MIPS Expert Assistant</div>
-              <div style={{ fontSize: 12, color: "#555", textAlign: "center", maxWidth: 420, lineHeight: 1.8 }}>
-                Enter a <span style={{ color: "#4db8ff" }}>Measure ID</span> + <span style={{ color: "#4db8ff" }}>Year</span> and click <strong>Load Official CMS PDF</strong>.<br /><br />
-                The server downloads the <strong>actual CMS specification PDF</strong> from qpp.cms.gov, extracts all text, and feeds it directly to the AI — so answers come from the real document, not memory.
+      {/* ── Change Measure Modal ── */}
+      {showChangeModal && (
+        <div className="overlay" onClick={e => { if(e.target===e.currentTarget) setShowChangeModal(false); }}>
+          <div className="modal fade">
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
+              <div style={{ fontFamily:"'Bricolage Grotesque',sans-serif", fontSize:18, fontWeight:800, color:"#e2e8f0" }}>
+                Change Measure
               </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
-                {["📄 Real PDF Content", "🌐 qpp.cms.gov", "📦 Cached 7 days", "2022–2025"].map(t => (
-                  <span key={t} style={{ fontSize: 10, padding: "4px 12px", borderRadius: 20, background: "rgba(77,184,255,0.08)", border: "1px solid rgba(77,184,255,0.15)", color: "#4db8ff" }}>{t}</span>
+              <button onClick={() => setShowChangeModal(false)} style={{ background:"none", border:"none", color:"#4b5563", fontSize:22, cursor:"pointer" }}>✕</button>
+            </div>
+
+            <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+              <div>
+                <div style={{ fontSize:11, color:"#4b5563", textTransform:"uppercase", letterSpacing:"1.5px", marginBottom:8, fontWeight:600 }}>Measure ID</div>
+                <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                  <span style={{ color:"#22d3ee", fontSize:20, fontWeight:800 }}>#</span>
+                  <input className="mi" value={draftId} placeholder="e.g. 226"
+                    onChange={e => setDraftId(e.target.value.replace(/\D/g,""))}
+                    onKeyDown={e => e.key==="Enter" && loadSpec(draftId, draftYear)}
+                    style={{ fontSize:18, fontWeight:700 }} autoFocus />
+                </div>
+              </div>
+
+              <div>
+                <div style={{ fontSize:11, color:"#4b5563", textTransform:"uppercase", letterSpacing:"1.5px", marginBottom:8, fontWeight:600 }}>Year</div>
+                <select className="mi" value={draftYear} onChange={e => setDraftYear(e.target.value)}>
+                  {YEARS.map(y => <option key={y}>{y}</option>)}
+                </select>
+              </div>
+
+              {specError && <div style={{ background:"rgba(248,113,113,0.08)", border:"1.5px solid rgba(248,113,113,0.2)", borderRadius:10, padding:"10px 14px", color:"#f87171", fontSize:13 }}>⚠️ {specError}</div>}
+
+              <button className="load-btn" onClick={() => loadSpec(draftId, draftYear)} disabled={!draftId.trim() || loadingSpec}>
+                {loadingSpec ? <><span className="spin">⚡</span> Loading...</> : `📄 Load MIPS #${draftId || "?"} (${draftYear})`}
+              </button>
+
+              {/* Quick picks */}
+              <div style={{ display:"flex", flexWrap:"wrap", gap:8, paddingTop:4 }}>
+                {[["001","HbA1c"],["130","Documentation"],["226","Tobacco"],["236","HTN"],["317","Preventive"]].map(([id,label]) => (
+                  <button key={id} onClick={() => setDraftId(id)}
+                    style={{ padding:"8px 12px", borderRadius:20, border:"1.5px solid", borderColor:draftId===id?"rgba(6,182,212,0.5)":"#1e2030", background:draftId===id?"rgba(6,182,212,0.08)":"transparent", color:draftId===id?"#22d3ee":"#4b5563", fontSize:12, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>
+                    #{id} {label}
+                  </button>
                 ))}
               </div>
             </div>
-          )}
-
-          {messages.map((msg, i) => (
-            <div key={i} className="fade" style={{ display: "flex", flexDirection: msg.role === "user" ? "row-reverse" : "row", gap: 10, alignItems: "flex-start" }}>
-              <div style={{
-                width: 32, height: 32, borderRadius: 8, flexShrink: 0, display: "flex",
-                alignItems: "center", justifyContent: "center", fontSize: 15,
-                background: msg.role === "user" ? "linear-gradient(135deg,#4db8ff,#a855f7)" : "rgba(74,222,128,0.1)",
-                border: msg.role !== "user" ? "1px solid rgba(74,222,128,0.2)" : "none",
-              }}>
-                {msg.role === "user" ? "👤" : "🏥"}
-              </div>
-              <div style={{
-                maxWidth: "80%",
-                background: msg.role === "user" ? "rgba(77,184,255,0.07)" : msg.isSystem ? "rgba(74,222,128,0.04)" : "rgba(255,255,255,0.02)",
-                border: `1px solid ${msg.role === "user" ? "rgba(77,184,255,0.18)" : msg.isSystem ? "rgba(74,222,128,0.18)" : "#1e1e2e"}`,
-                borderRadius: msg.role === "user" ? "12px 2px 12px 12px" : "2px 12px 12px 12px",
-                padding: "12px 16px",
-              }}>
-                {fmt(msg.displayContent)}
-                <div style={{ fontSize: 9, color: "#2a2a3a", marginTop: 8, textAlign: msg.role === "user" ? "right" : "left" }}>{msg.timestamp}</div>
-              </div>
-            </div>
-          ))}
-
-          {loading && (
-            <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-              <div style={{ width: 32, height: 32, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, background: "rgba(74,222,128,0.1)", border: "1px solid rgba(74,222,128,0.2)" }}>🏥</div>
-              <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid #1e1e2e", borderRadius: "2px 12px 12px 12px", padding: "12px 16px", display: "flex", alignItems: "center", gap: 10 }}>
-                <span className="spin">⚡</span>
-                <span style={{ fontSize: 12, color: "#555" }}>Reading CMS PDF for Measure #{measureId}...</span>
-              </div>
-            </div>
-          )}
-
-          {error && <div style={{ background: "rgba(255,77,77,0.08)", border: "1px solid rgba(255,77,77,0.2)", borderRadius: 8, padding: "10px 14px", color: "#ff4d4d", fontSize: 12 }}>⚠️ {error}</div>}
-          <div ref={messagesEndRef} />
-        </div>
-
-        {specLoaded && messages.length > 1 && (
-          <div style={{ padding: "6px 20px", borderTop: "1px solid #1a1a2e", display: "flex", gap: 6, overflowX: "auto" }}>
-            {SUGGESTED_QUESTIONS.slice(0, 4).map((q, i) => (
-              <button key={i} onClick={() => setQuestion(q)} style={{ flexShrink: 0, padding: "5px 12px", borderRadius: 20, border: "1px solid #1e1e2e", background: "transparent", color: "#555", fontSize: 11, cursor: "pointer", whiteSpace: "nowrap" }}>{q}</button>
-            ))}
           </div>
-        )}
-
-        <div style={{ padding: "12px 20px", borderTop: "1px solid #1a1a2e", background: "#0a0a0f" }}>
-          {!specLoaded ? (
-            <div style={{ textAlign: "center", padding: 14, fontSize: 12, color: "#2a2a3a", border: "1px dashed #1a1a2e", borderRadius: 6 }}>
-              ← Load the CMS PDF first to start asking questions
-            </div>
-          ) : (
-            <div style={{ display: "flex", gap: 10 }}>
-              <textarea className="mi" value={question} rows={2}
-                onChange={e => setQuestion(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(question); } }}
-                placeholder={`Ask about MIPS #${measureId} (${year}) — answers from the actual CMS PDF...`}
-                style={{ flex: 1, resize: "none", lineHeight: 1.5 }}
-              />
-              <button className="send-btn" onClick={() => sendMessage(question)} disabled={loading || !question.trim()}>
-                {loading ? <span className="spin">⚡</span> : "Ask →"}
-              </button>
-            </div>
-          )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
