@@ -1,12 +1,13 @@
 /**
  * DevTools.jsx — All developer tools in one hub
- * Uses the same /api/review proxy endpoint as Code Review
+ * Mobile-first redesign — matches App.jsx patterns
  * Tools: Git Diff, Explainer, Refactor, TestGen, DocWriter,
  *        SQL, SecretScan, DepAudit, Regex, Architecture,
  *        HIPAA, FHIR, API Contract
  */
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import HelpPanel from "./Helppanel";
 
 const SERVER = "https://codescan-server.onrender.com";
 
@@ -159,70 +160,62 @@ Known CVEs or vulnerability patterns in listed packages + recommended safe versi
 ## 🟡 Outdated Packages
 Packages significantly behind current versions + what major features/fixes they're missing
 
-## 🟢 Healthy Dependencies  
-Well-maintained, up-to-date packages
+## 🟢 Well-Maintained Dependencies
+Packages that are current and well-maintained
 
-## 📦 Bloat & Redundancy
-Packages that duplicate functionality, unnecessary for stated purpose, or have lighter alternatives
-
-## Action Plan
-Priority-ordered list: what to update now, what to watch, what to remove
+## 📋 Action Plan
+Prioritized list: what to update immediately vs. can wait + migration notes for breaking changes
 
 DEPENDENCY FILE:
 ${input}`,
 
   regex: (input, opts) => `You are a regex expert. Analyze this regular expression.
 
-Provide:
-## 📖 Plain English Explanation
-Explain what the regex matches in simple language, piece by piece.
-Break down each token/group/quantifier with its meaning.
+## What It Matches
+Plain English description of what this regex matches and doesn't match
 
-## 🧪 Test Cases
-Show 5 strings that MATCH and 5 that DON'T MATCH with explanation why.
+## Step-by-Step Breakdown
+Explain each part of the regex: quantifiers, groups, character classes, anchors, etc.
 
-## ⚠️ Potential Issues
-- Edge cases that might cause unexpected matches
+## Potential Issues
+- Edge cases it misses
 - Catastrophic backtracking risks
-- Common pitfalls
+- Unicode/encoding issues
 
-## 🔄 Improved Version  
-If the regex can be made clearer, safer, or more efficient — show the improved version with explanation.
+## Test Cases
+5+ examples of strings it matches and 5+ it doesn't (with why)
+${opts.testStr ? `\nTest against this string: "${opts.testStr}"` : ""}
 
-${opts.testStr ? "## Test Against Provided String\nInput: " + opts.testStr + "\nResult: [does it match or not, and which groups capture what]" : ""}
+## Improved Version (if needed)
+A cleaner or more robust alternative with explanation
 
 REGEX:
 ${input}`,
 
-  arch: (input) => `You are a software architect reviewing multiple files for architectural quality.
+  arch: (input) => `You are a software architect. Review this codebase for architectural quality.
 
-Analyze:
 ## 🏗️ Architecture Overview
-What pattern/architecture is being used? How well is it applied?
+What pattern is being used (MVC, layered, microservices, etc.) and how well it's implemented
 
-## 🔴 Critical Concerns
-- Tight coupling between modules
-- Violations of separation of concerns
-- God classes/functions doing too much
-- Missing abstractions
+## 🔴 Critical Issues
+Circular dependencies, god objects, tight coupling, violated separation of concerns
 
 ## 🟡 Design Smells
-- Dependency direction issues
-- Leaky abstractions
-- Premature optimization or over-engineering
+Code that will cause maintainability problems as the project grows
 
-## 📁 Structure Recommendations
-- How to reorganize files/folders
-- What to extract into separate modules
-- Interface/abstraction suggestions
+## 🟢 Good Patterns
+Well-structured parts worth preserving
 
-## 🟢 Good Patterns Found
-Architectural decisions worth keeping
+## Dependency Map
+Key dependencies between modules/files and whether they're healthy
+
+## Refactoring Roadmap
+Prioritized list of architectural improvements with estimated impact
 
 FILES:
 ${input}`,
 
-  hipaa: (input) => `You are a HIPAA compliance expert and security engineer reviewing code for a healthcare application.
+  hipaa: (input) => `You are a HIPAA compliance expert and healthcare security engineer.
 
 Audit for HIPAA Technical Safeguard violations:
 
@@ -350,14 +343,22 @@ const TOOL_CONFIG = {
 // ── Main component ────────────────────────────────────────────────────────────
 export default function DevTools({ isDark = true }) {
   const [activeTool, setActiveTool] = useState("diff");
+  const [activePanel, setActivePanel] = useState("input"); // mobile: "input" | "result"
   const [inputs, setInputs]         = useState({});
   const [extras, setExtras]         = useState({});
   const [results, setResults]       = useState({});
   const [running, setRunning]       = useState({});
   const [errors, setErrors]         = useState({});
+  const [isMobile, setIsMobile]     = useState(window.innerWidth < 768);
   const fileInputRef                = useRef(null);
 
-  // Theme
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+
+  // Theme — same token set as App.jsx
   const T = {
     bg:       isDark ? "#07080f" : "#f1f5f9",
     surface:  isDark ? "#0d0f1a" : "#ffffff",
@@ -377,6 +378,12 @@ export default function DevTools({ isDark = true }) {
   const getInput = ()          => inputs[activeTool]  || "";
   const getExtra = (k, def="") => (extras[activeTool] || {})[k] || def;
 
+  // Switch tool — on mobile jump to input panel
+  const handleToolSelect = (id) => {
+    setActiveTool(id);
+    setActivePanel("input");
+  };
+
   const run = async () => {
     const input = getInput().trim();
     if (!input) return;
@@ -384,6 +391,8 @@ export default function DevTools({ isDark = true }) {
     setRunning(p => ({ ...p, [tid]: true }));
     setErrors(p  => ({ ...p, [tid]: null }));
     setResults(p => ({ ...p, [tid]: null }));
+    // On mobile — auto-navigate to result panel
+    if (isMobile) setActivePanel("result");
 
     try {
       const opts = extras[tid] || {};
@@ -417,12 +426,10 @@ export default function DevTools({ isDark = true }) {
         return <div key={i} style={{ fontSize:14, fontWeight:700, color:T.text, marginTop:18, marginBottom:6, fontFamily:"'Bricolage Grotesque',sans-serif", borderBottom:"1px solid " + T.border, paddingBottom:4 }}>{line.slice(3)}</div>;
       if (line.startsWith("### "))
         return <div key={i} style={{ fontSize:13, fontWeight:700, color: isDark ? "#94a3b8" : "#475569", marginTop:12, marginBottom:4 }}>{line.slice(4)}</div>;
-      if (line.startsWith("```")) {
-        return <div key={i} style={{ fontFamily:"'DM Mono',monospace", fontSize:11, color: isDark?"#a5b4fc":"#4338ca", background: isDark?"rgba(99,102,241,0.08)":"rgba(99,102,241,0.06)", borderLeft:"3px solid #6366f1", padding:"2px 8px", borderRadius:"0 4px 4px 0", marginTop:2 }}></div>;
-      }
+      if (line.startsWith("```"))
+        return <div key={i} style={{ fontFamily:"'DM Mono',monospace", fontSize:11, color: isDark?"#a5b4fc":"#4338ca", background: isDark?"rgba(99,102,241,0.08)":"rgba(99,102,241,0.06)", borderLeft:"3px solid #6366f1", padding:"2px 8px", borderRadius:"0 4px 4px 0", marginTop:2 }} />;
       if (line.startsWith("- ") || line.startsWith("• "))
         return <div key={i} style={{ paddingLeft:16, marginBottom:4, color:T.textSub, fontSize:13, lineHeight:1.65, display:"flex", gap:8 }}><span style={{ color:tool.color, flexShrink:0 }}>·</span><span>{line.slice(2)}</span></div>;
-      // code blocks inside lines
       const html = line
         .replace(/`([^`]+)`/g, '<code style="background:' + (isDark?"rgba(99,102,241,0.12)":"rgba(99,102,241,0.08)") + ';color:' + (isDark?"#a5b4fc":"#4338ca") + ';padding:1px 6px;border-radius:4px;font-size:12px;font-family:DM Mono,monospace">$1</code>')
         .replace(/\*\*([^*]+)\*\*/g, '<strong style="color:' + T.text + ';font-weight:700">$1</strong>');
@@ -437,155 +444,269 @@ export default function DevTools({ isDark = true }) {
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <div style={{ display:"flex", height:"calc(100vh - 65px)", background:T.bg, fontFamily:"'DM Sans',sans-serif", overflow:"hidden" }}>
+    <div style={{ display:"flex", flexDirection:"column", height: isMobile ? "calc(100vh - 65px - 72px)" : "calc(100vh - 65px)", background:T.bg, fontFamily:"'DM Sans',sans-serif", overflow:"hidden" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=Bricolage+Grotesque:wght@700;800&display=swap');
-        .dt-textarea { width:100%; background:${T.inputBg}; border:1.5px solid ${T.border}; color:${T.text}; padding:14px; border-radius:10px; font-family:'DM Mono',monospace; font-size:13px; outline:none; resize:vertical; line-height:1.6; transition:border-color 0.2s; }
+
+        /* ── Inputs ── */
+        .dt-textarea { width:100%; background:${T.inputBg}; border:1.5px solid ${T.border}; color:${T.text}; padding:14px; border-radius:10px; font-family:'DM Mono',monospace; font-size:13px; outline:none; resize:vertical; line-height:1.6; transition:border-color 0.2s; box-sizing:border-box; }
         .dt-textarea:focus { border-color:${tool.color}; }
         .dt-select { background:${T.inputBg}; border:1.5px solid ${T.border}; color:${T.text}; padding:8px 12px; border-radius:8px; font-family:'DM Sans',sans-serif; font-size:13px; outline:none; cursor:pointer; }
-        .dt-input { background:${T.inputBg}; border:1.5px solid ${T.border}; color:${T.text}; padding:9px 12px; border-radius:8px; font-family:'DM Mono',monospace; font-size:13px; outline:none; width:100%; }
+        .dt-input  { background:${T.inputBg}; border:1.5px solid ${T.border}; color:${T.text}; padding:9px 12px; border-radius:8px; font-family:'DM Mono',monospace; font-size:13px; outline:none; width:100%; box-sizing:border-box; }
         .dt-input:focus, .dt-select:focus { border-color:${tool.color}; }
+
+        /* ── Sidebar tool buttons (desktop) ── */
         .dt-tool-btn { display:flex; align-items:center; gap:8px; padding:9px 12px; border-radius:8px; border:none; background:transparent; cursor:pointer; font-family:'DM Sans',sans-serif; font-size:13px; font-weight:500; text-align:left; width:100%; transition:all 0.15s; }
         .dt-tool-btn:hover { background:${isDark?"rgba(255,255,255,0.04)":"rgba(0,0,0,0.04)"}; }
         .dt-tool-btn.active { background:${isDark?"rgba(255,255,255,0.07)":"rgba(0,0,0,0.07)"}; font-weight:700; }
-        .dt-run-btn { background:linear-gradient(135deg,${tool.color},${isDark?"#6366f1":"#4f46e5"}); border:none; color:white; padding:13px 28px; border-radius:10px; cursor:pointer; font-family:'Bricolage Grotesque',sans-serif; font-weight:800; font-size:15px; transition:all 0.2s; min-width:140px; }
+
+        /* ── Mobile tool strip buttons ── */
+        .dt-strip-btn { display:flex; flex-direction:column; align-items:center; gap:3px; padding:8px 10px; border-radius:10px; border:none; background:transparent; cursor:pointer; font-family:'DM Sans',sans-serif; font-size:10px; font-weight:600; white-space:nowrap; transition:all 0.15s; flex-shrink:0; color:${T.textSub}; }
+        .dt-strip-btn.active { background:${isDark?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.06)"}; }
+        .dt-strip-btn:hover { background:${isDark?"rgba(255,255,255,0.05)":"rgba(0,0,0,0.04)"}; }
+
+        /* ── Panel toggle (like cc-panel-toggle in App.jsx) ── */
+        .dt-panel-toggle { display:flex; background:${T.inputBg}; border:1px solid ${T.border}; border-radius:10px; padding:3px; gap:3px; }
+        .dt-panel-btn { flex:1; padding:8px 12px; border-radius:8px; border:none; cursor:pointer; font-family:'DM Sans',sans-serif; font-size:13px; font-weight:600; transition:all 0.15s; background:transparent; color:${T.textSub}; }
+        .dt-panel-btn.active { background:${T.surface}; color:${tool.color}; box-shadow:0 1px 4px rgba(0,0,0,0.2); }
+
+        /* ── Action buttons ── */
+        .dt-run-btn { background:linear-gradient(135deg,${tool.color},${isDark?"#6366f1":"#4f46e5"}); border:none; color:white; padding:14px 24px; border-radius:12px; cursor:pointer; font-family:'Bricolage Grotesque',sans-serif; font-weight:800; font-size:15px; transition:all 0.2s; width:100%; min-height:52px; box-shadow:0 4px 20px rgba(0,0,0,0.2); }
         .dt-run-btn:disabled { opacity:0.4; cursor:not-allowed; }
-        .dt-run-btn:hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 6px 20px rgba(0,0,0,0.3); }
+        .dt-run-btn:hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 6px 24px rgba(0,0,0,0.3); }
+        .dt-copy-btn { padding:6px 12px; border-radius:6px; border:1.5px solid ${T.border}; background:transparent; color:${T.textSub}; font-size:11px; cursor:pointer; font-family:'DM Sans',sans-serif; font-weight:600; transition:all 0.15s; }
+        .dt-copy-btn:hover { border-color:${tool.color}; color:${tool.color}; }
+
+        /* ── Animations ── */
         .spin { animation:spin 1s linear infinite; display:inline-block; }
         @keyframes spin { to { transform:rotate(360deg); } }
-        .dt-copy-btn { padding:6px 12px; border-radius:6px; border:1.5px solid ${T.border}; background:transparent; color:${T.textMuted}; font-size:11px; cursor:pointer; font-family:'DM Sans',sans-serif; font-weight:600; transition:all 0.15s; }
-        .dt-copy-btn:hover { border-color:${tool.color}; color:${tool.color}; }
+        .fade-in { animation:fadeIn 0.2s ease; }
+        @keyframes fadeIn { from{opacity:0;transform:translateY(-3px)} to{opacity:1;transform:translateY(0)} }
+
+        /* ── Scrollbar ── */
         ::-webkit-scrollbar { width:4px; height:4px; }
         ::-webkit-scrollbar-track { background:transparent; }
         ::-webkit-scrollbar-thumb { background:${T.border}; border-radius:4px; }
+
+        /* ── Responsive helpers ── */
+        .dt-desktop-only { display:flex; }
+        .dt-mobile-only  { display:none; }
+        @media (max-width: 767px) {
+          .dt-desktop-only { display:none !important; }
+          .dt-mobile-only  { display:flex !important; }
+        }
       `}</style>
 
-      {/* ── LEFT SIDEBAR — tool picker ── */}
-      <div style={{ width:200, flexShrink:0, borderRight:"1px solid " + T.border, background:T.surface, overflowY:"auto", padding:"12px 8px" }}>
+      {/* ══════════════════════════════════════════════════════════════
+          MOBILE — horizontal tool strip + panel toggle
+      ══════════════════════════════════════════════════════════════ */}
+
+      {/* Mobile: grouped tool strip */}
+      <div className="dt-mobile-only" style={{ flexDirection:"column", borderBottom:"1px solid " + T.border, background:T.surface, flexShrink:0 }}>
         {Object.entries(GROUP_LABELS).map(([group, groupLabel]) => (
-          <div key={group} style={{ marginBottom:16 }}>
-            <div style={{ fontSize:10, color:T.textMuted, fontWeight:700, letterSpacing:"1.2px", textTransform:"uppercase", padding:"0 8px", marginBottom:6 }}>
+          <div key={group} style={{ borderBottom: group !== "hard" ? "1px solid " + T.border : "none" }}>
+            <div style={{ fontSize:9, color:T.textMuted, fontWeight:700, letterSpacing:"1.4px", textTransform:"uppercase", padding:"6px 14px 2px" }}>
               {groupLabel}
             </div>
-            {TOOLS.filter(t => t.group === group).map(t => (
-              <button key={t.id} className={"dt-tool-btn" + (activeTool===t.id?" active":"")}
-                onClick={() => setActiveTool(t.id)}
-                style={{ color: activeTool===t.id ? t.color : T.textSub }}>
-                <span style={{ fontSize:15 }}>{t.icon}</span>
-                <span>{t.label}</span>
-                {results[t.id] && <span style={{ marginLeft:"auto", width:6, height:6, borderRadius:"50%", background:t.color, flexShrink:0 }} />}
-              </button>
-            ))}
+            <div style={{ display:"flex", overflowX:"auto", padding:"4px 8px 8px", gap:2 }}>
+              {TOOLS.filter(t => t.group === group).map(t => (
+                <button key={t.id} className={"dt-strip-btn" + (activeTool===t.id?" active":"")}
+                  onClick={() => handleToolSelect(t.id)}
+                  style={{ color: activeTool===t.id ? t.color : T.textSub }}>
+                  <span style={{ fontSize:18, position:"relative" }}>
+                    {t.icon}
+                    {results[t.id] && <span style={{ position:"absolute", top:-2, right:-2, width:6, height:6, borderRadius:"50%", background:t.color }} />}
+                  </span>
+                  <span style={{ fontSize:9 }}>{t.label.split(" ")[0]}</span>
+                </button>
+              ))}
+            </div>
           </div>
         ))}
       </div>
 
-      {/* ── MAIN AREA ── */}
-      <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
-
-        {/* Tool header */}
-        <div style={{ padding:"14px 20px", borderBottom:"1px solid " + T.border, background:T.surface, display:"flex", alignItems:"center", gap:12, flexShrink:0 }}>
-          <div style={{ width:36, height:36, borderRadius:10, background:"linear-gradient(135deg," + tool.color + ",#6366f1)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>
+      {/* Mobile: tool header + panel toggle */}
+      <div className="dt-mobile-only" style={{ flexDirection:"column", padding:"10px 14px", gap:10, borderBottom:"1px solid " + T.border, background:T.surface, flexShrink:0 }}>
+        {/* Tool identity */}
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <div style={{ width:32, height:32, borderRadius:9, background:"linear-gradient(135deg," + tool.color + ",#6366f1)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, flexShrink:0 }}>
             {tool.icon}
           </div>
-          <div>
-            <div style={{ fontFamily:"'Bricolage Grotesque',sans-serif", fontSize:16, fontWeight:800, color:T.text }}>{tool.label}</div>
-            <div style={{ fontSize:11, color:T.textMuted, textTransform:"uppercase", letterSpacing:"0.8px" }}>{GROUP_LABELS[tool.group]}</div>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontFamily:"'Bricolage Grotesque',sans-serif", fontSize:14, fontWeight:800, color:T.text, lineHeight:1.1 }}>{tool.label}</div>
+            <div style={{ fontSize:9, color:T.textMuted, textTransform:"uppercase", letterSpacing:"0.8px", marginTop:1 }}>{GROUP_LABELS[tool.group]}</div>
           </div>
           {resultVal && (
-            <button className="dt-copy-btn" style={{ marginLeft:"auto" }}
+            <button className="dt-copy-btn" style={{ fontSize:10, flexShrink:0 }}
               onClick={() => navigator.clipboard.writeText(resultVal)}>
-              📋 Copy Result
+              📋 Copy
             </button>
           )}
         </div>
+        {/* Panel toggle */}
+        <div className="dt-panel-toggle">
+          <button className={"dt-panel-btn" + (activePanel==="input"?" active":"")} onClick={() => setActivePanel("input")}>
+            ✏️ Input
+          </button>
+          <button className={"dt-panel-btn" + (activePanel==="result"?" active":"")} onClick={() => setActivePanel("result")}>
+            📊 Result {resultVal && "·✓"}
+          </button>
+        </div>
+      </div>
 
-        {/* Input + Result split */}
-        <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
+      {/* ══════════════════════════════════════════════════════════════
+          SHARED BODY — splits into desktop sidebar+panes / mobile single column
+      ══════════════════════════════════════════════════════════════ */}
+      <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
 
-          {/* Input pane */}
-          <div style={{ width:"45%", borderRight:"1px solid " + T.border, display:"flex", flexDirection:"column", padding:20, gap:12, overflowY:"auto" }}>
-
-            {/* Extra options */}
-            {cfg.extras && cfg.extras.map(ex => (
-              <div key={ex.key}>
-                <div style={{ fontSize:11, color:T.textMuted, textTransform:"uppercase", letterSpacing:"1.2px", marginBottom:6, fontWeight:600 }}>{ex.label}</div>
-                {ex.options ? (
-                  <select className="dt-select" value={getExtra(ex.key, ex.options[0])} onChange={e => setExtra(ex.key, e.target.value)}>
-                    {ex.options.map(o => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                ) : (
-                  <input className="dt-input" placeholder={ex.placeholder || ""} value={getExtra(ex.key)} onChange={e => setExtra(ex.key, e.target.value)} />
-                )}
+        {/* ── Desktop: LEFT SIDEBAR ── */}
+        <div className="dt-desktop-only" style={{ width:200, flexShrink:0, borderRight:"1px solid " + T.border, background:T.surface, overflowY:"auto", padding:"12px 8px", flexDirection:"column" }}>
+          {Object.entries(GROUP_LABELS).map(([group, groupLabel]) => (
+            <div key={group} style={{ marginBottom:16 }}>
+              <div style={{ fontSize:10, color:T.textMuted, fontWeight:700, letterSpacing:"1.2px", textTransform:"uppercase", padding:"0 8px", marginBottom:6 }}>
+                {groupLabel}
               </div>
-            ))}
-
-            {/* Main input */}
-            <div style={{ flex:1, display:"flex", flexDirection:"column", gap:6 }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                <div style={{ fontSize:11, color:T.textMuted, textTransform:"uppercase", letterSpacing:"1.2px", fontWeight:600 }}>{cfg.label}</div>
-                <div style={{ display:"flex", gap:8 }}>
-                  <button className="dt-copy-btn" onClick={() => setInput("")} style={{ fontSize:10 }}>Clear</button>
-                  <button className="dt-copy-btn" onClick={() => fileInputRef.current?.click()} style={{ fontSize:10 }}>📁 Load File</button>
-                </div>
-              </div>
-              <textarea className="dt-textarea" rows={cfg.rows || 14}
-                placeholder={cfg.placeholder}
-                value={inputVal}
-                onChange={e => setInput(e.target.value)}
-                style={{ flex:1, minHeight: (cfg.rows || 14) * 22 }}
-              />
+              {TOOLS.filter(t => t.group === group).map(t => (
+                <button key={t.id} className={"dt-tool-btn" + (activeTool===t.id?" active":"")}
+                  onClick={() => handleToolSelect(t.id)}
+                  style={{ color: activeTool===t.id ? t.color : T.textSub }}>
+                  <span style={{ fontSize:15 }}>{t.icon}</span>
+                  <span>{t.label}</span>
+                  {results[t.id] && <span style={{ marginLeft:"auto", width:6, height:6, borderRadius:"50%", background:t.color, flexShrink:0 }} />}
+                </button>
+              ))}
             </div>
+          ))}
+        </div>
 
-            <button className="dt-run-btn" onClick={run} disabled={isRunning || !inputVal.trim()}>
-              {isRunning ? <><span className="spin">⚡</span> Analyzing...</> : `${tool.icon} Run ${tool.label}`}
-            </button>
+        {/* ── Desktop: MAIN AREA / Mobile: FULL AREA ── */}
+        <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
 
-            <input ref={fileInputRef} type="file" style={{ display:"none" }}
-              onChange={async e => {
-                const file = e.target.files?.[0];
-                if (file) { const text = await file.text(); setInput(text); e.target.value = ""; }
-              }} />
+          {/* Desktop-only tool header */}
+          <div className="dt-desktop-only" style={{ padding:"14px 20px", borderBottom:"1px solid " + T.border, background:T.surface, alignItems:"center", gap:12, flexShrink:0 }}>
+            <div style={{ width:36, height:36, borderRadius:10, background:"linear-gradient(135deg," + tool.color + ",#6366f1)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>
+              {tool.icon}
+            </div>
+            <div>
+              <div style={{ fontFamily:"'Bricolage Grotesque',sans-serif", fontSize:16, fontWeight:800, color:T.text }}>{tool.label}</div>
+              <div style={{ fontSize:11, color:T.textMuted, textTransform:"uppercase", letterSpacing:"0.8px" }}>{GROUP_LABELS[tool.group]}</div>
+            </div>
+            {resultVal && (
+              <button className="dt-copy-btn" style={{ marginLeft:"auto" }}
+                onClick={() => navigator.clipboard.writeText(resultVal)}>
+                📋 Copy Result
+              </button>
+            )}
           </div>
 
-          {/* Result pane */}
-          <div style={{ flex:1, overflowY:"auto", padding:20 }}>
-            {!resultVal && !isRunning && !errVal && (
-              <div style={{ height:"100%", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16, opacity:0.25 }}>
-                <div style={{ fontSize:56 }}>{tool.icon}</div>
-                <div style={{ fontFamily:"'Bricolage Grotesque',sans-serif", fontSize:20, fontWeight:800, color:T.text }}>
-                  {tool.label}
+          {/* Input + Result panels */}
+          <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
+
+            {/* ── INPUT PANE ── */}
+            {(!isMobile || activePanel === "input") && (
+              <div style={{
+                width: isMobile ? "100%" : "45%",
+                borderRight: isMobile ? "none" : "1px solid " + T.border,
+                display:"flex", flexDirection:"column",
+                padding: isMobile ? "16px" : "20px",
+                gap:12, overflowY:"auto"
+              }}>
+                {/* Extra options */}
+                {cfg.extras && cfg.extras.map(ex => (
+                  <div key={ex.key}>
+                    <div style={{ fontSize:11, color:T.textMuted, textTransform:"uppercase", letterSpacing:"1.2px", marginBottom:6, fontWeight:600 }}>{ex.label}</div>
+                    {ex.options ? (
+                      <select className="dt-select" value={getExtra(ex.key, ex.options[0])} onChange={e => setExtra(ex.key, e.target.value)}>
+                        {ex.options.map(o => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                    ) : (
+                      <input className="dt-input" placeholder={ex.placeholder || ""} value={getExtra(ex.key)} onChange={e => setExtra(ex.key, e.target.value)} />
+                    )}
+                  </div>
+                ))}
+
+                {/* Main input */}
+                <div style={{ flex:1, display:"flex", flexDirection:"column", gap:6 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <div style={{ fontSize:11, color:T.textMuted, textTransform:"uppercase", letterSpacing:"1.2px", fontWeight:600 }}>{cfg.label}</div>
+                    <div style={{ display:"flex", gap:8 }}>
+                      <button className="dt-copy-btn" onClick={() => setInput("")} style={{ fontSize:10 }}>Clear</button>
+                      <button className="dt-copy-btn" onClick={() => fileInputRef.current?.click()} style={{ fontSize:10 }}>📁 Load File</button>
+                    </div>
+                  </div>
+                  <textarea className="dt-textarea"
+                    rows={isMobile ? Math.min(cfg.rows || 14, 10) : (cfg.rows || 14)}
+                    placeholder={cfg.placeholder}
+                    value={inputVal}
+                    onChange={e => setInput(e.target.value)}
+                    style={{ flex:1, minHeight: isMobile ? 160 : (cfg.rows || 14) * 22 }}
+                  />
                 </div>
-                <div style={{ fontSize:13, color:T.textSub, textAlign:"center", maxWidth:280, lineHeight:1.7 }}>
-                  {cfg.placeholder.slice(0, 80)}...
-                </div>
+
+                <button className="dt-run-btn" onClick={run} disabled={isRunning || !inputVal.trim()}>
+                  {isRunning ? <><span className="spin">⚡</span> Analyzing...</> : `${tool.icon} Run ${tool.label}`}
+                </button>
+
+                <input ref={fileInputRef} type="file" style={{ display:"none" }}
+                  onChange={async e => {
+                    const file = e.target.files?.[0];
+                    if (file) { const text = await file.text(); setInput(text); e.target.value = ""; }
+                  }} />
               </div>
             )}
 
-            {isRunning && (
-              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16, padding:"80px 20px" }}>
-                <div style={{ width:52, height:52, border:"3px solid " + T.border, borderTopColor:tool.color, borderRadius:"50%" }} className="spin" />
-                <div style={{ fontFamily:"'Bricolage Grotesque',sans-serif", fontSize:15, fontWeight:700, color:T.text }}>
-                  Analyzing with AI...
-                </div>
-                <div style={{ fontSize:12, color:T.textMuted }}>This usually takes 5–15 seconds</div>
-              </div>
-            )}
+            {/* ── RESULT PANE ── */}
+            {(!isMobile || activePanel === "result") && (
+              <div style={{
+                flex:1,
+                overflowY:"auto",
+                padding: isMobile ? "16px" : "20px",
+                width: isMobile ? "100%" : undefined,
+              }}>
+                {!resultVal && !isRunning && !errVal && (
+                  <div style={{ height:"100%", minHeight:240, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16, opacity:0.25 }}>
+                    <div style={{ fontSize:isMobile?44:56 }}>{tool.icon}</div>
+                    <div style={{ fontFamily:"'Bricolage Grotesque',sans-serif", fontSize:isMobile?16:20, fontWeight:800, color:T.text }}>
+                      {tool.label}
+                    </div>
+                    <div style={{ fontSize:13, color:T.textSub, textAlign:"center", maxWidth:260, lineHeight:1.7 }}>
+                      {cfg.placeholder.slice(0, 70)}...
+                    </div>
+                    {isMobile && (
+                      <button className="dt-copy-btn" onClick={() => setActivePanel("input")} style={{ opacity:1, marginTop:4 }}>
+                        ✏️ Go to Input
+                      </button>
+                    )}
+                  </div>
+                )}
 
-            {errVal && (
-              <div style={{ background: isDark?"rgba(248,113,113,0.08)":"rgba(254,202,202,0.4)", border:"1px solid rgba(248,113,113,0.3)", borderRadius:12, padding:"14px 18px", color:"#f87171", fontSize:13 }}>
-                ⚠️ {errVal}
-              </div>
-            )}
+                {isRunning && (
+                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16, padding:"60px 20px" }}>
+                    <div style={{ width:52, height:52, border:"3px solid " + T.border, borderTopColor:tool.color, borderRadius:"50%" }} className="spin" />
+                    <div style={{ fontFamily:"'Bricolage Grotesque',sans-serif", fontSize:15, fontWeight:700, color:T.text }}>
+                      Analyzing with AI...
+                    </div>
+                    <div style={{ fontSize:12, color:T.textMuted }}>This usually takes 5–15 seconds</div>
+                  </div>
+                )}
 
-            {resultVal && !isRunning && (
-              <div style={{ lineHeight:1.7 }}>
-                {fmt(resultVal)}
+                {errVal && (
+                  <div className="fade-in" style={{ background: isDark?"rgba(248,113,113,0.08)":"rgba(254,202,202,0.4)", border:"1px solid rgba(248,113,113,0.3)", borderRadius:12, padding:"14px 18px", color:"#f87171", fontSize:13 }}>
+                    ⚠️ {errVal}
+                  </div>
+                )}
+
+                {resultVal && !isRunning && (
+                  <div className="fade-in" style={{ lineHeight:1.7 }}>
+                    {fmt(resultVal)}
+                  </div>
+                )}
               </div>
             )}
           </div>
         </div>
       </div>
+      <HelpPanel tab="devtools" tool={activeTool} isDark={isDark} />
     </div>
   );
 }

@@ -9,6 +9,7 @@
  */
 
 import React, { useState, useRef, useEffect } from "react";
+import HelpPanel from "./Helppanel";
 
 const SERVER = "https://codescan-server.onrender.com";
 const YEARS  = ["2026", "2025", "2024", "2023", "2022"];
@@ -803,6 +804,7 @@ export default function MipsChat({ isDark = true }) {
           </div>
         </div>
       )}
+      <HelpPanel tab="mips" isDark={isDark} />
     </div>
   );
 }

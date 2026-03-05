@@ -8,6 +8,7 @@ import { reviewCode, STANDARDS, LANGUAGE_LABELS, detectLanguageFromExt } from "@
 import { ScoreRing, IssueCard } from "@codescan/ui";
 import MipsChat  from "./MipsChat.jsx";
 import DevTools  from "./DevTools.jsx";
+import HelpPanel from "./Helppanel.jsx";
 
 const SUPPORTED_EXTENSIONS = [".js",".jsx",".ts",".tsx",".py",".java",".go",".rs",".cpp",".c",".cs",".rb",".php",".swift",".kt",".vue",".svelte",".sql",".sh",".bash",".scala",".r",".dart"];
 const IGNORED_DIRS = ["node_modules",".git","dist","build",".next","out","coverage",".turbo"];
@@ -54,7 +55,7 @@ export default function App() {
     return () => window.removeEventListener("resize", handler);
   }, []);
 
-  // Theme colours (passed to child components + used in Code Review panel)
+  // Theme colours
   const bg      = isDark ? "#07080f" : "#f1f5f9";
   const surface = isDark ? "#0d0f1a" : "#ffffff";
   const border  = isDark ? "#1a1c2e" : "#e2e8f0";
@@ -287,7 +288,7 @@ export default function App() {
       </div>
 
       {/* ── Main Content ── */}
-      <main style={{ flex:1, display:"flex", flexDirection:"column" }}>
+      <main style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden", minHeight:0 }}>
 
         {activeTab === "mips" ? (
           <MipsChat isDark={isDark} />
@@ -311,12 +312,13 @@ export default function App() {
               </div>
             )}
 
-            <div style={{ flex:1, display:"flex", flexDirection:"column" }}>
-              <div style={{ display: isMobile ? "block" : "flex", flex:1 }}>
+            <div style={{ flex:1, display:"flex", flexDirection:"column", minHeight:0 }}>
+              <div style={{ display: isMobile ? "block" : "flex", flex:1, minHeight:0 }}>
 
                 {/* ── Left / Input Panel ── */}
+                {/* FIX: overflowY:auto so this panel scrolls to reveal the Analyze button */}
                 {(!isMobile || activePanel==="input") && (
-                  <div style={{ width:isMobile?"100%":"52%", padding:isMobile?"16px":"24px", borderRight:isMobile?"none":"1px solid "+border, display:"flex", flexDirection:"column", gap:16 }}>
+                  <div style={{ width:isMobile?"100%":"52%", padding:isMobile?"16px":"24px", borderRight:isMobile?"none":"1px solid "+border, display:"flex", flexDirection:"column", gap:16, overflowY:"auto" }}>
 
                     {/* Mode toggle */}
                     <div className="cc-panel-toggle">
@@ -357,7 +359,8 @@ export default function App() {
                             {LANGUAGE_LABELS.map(l => <option key={l}>{l}</option>)}
                           </select>
                         </div>
-                        <div style={{ flex:1 }}>
+                        {/* FIX: removed flex:1 from this wrapper — was preventing scroll */}
+                        <div>
                           <span className="cc-section-label">Code · {code.split("\n").length} lines</span>
                           <textarea className="cc-input" value={code} onChange={e => setCode(e.target.value)} spellCheck={false} placeholder={`Paste your ${language} code here...`} style={{ minHeight:isMobile?200:280 }} />
                         </div>
@@ -424,7 +427,7 @@ export default function App() {
 
                 {/* ── Right / Results Panel ── */}
                 {(!isMobile || activePanel==="results") && (
-                  <div style={{ width:isMobile?"100%":"48%", padding:isMobile?"16px":"24px", overflowY:"auto", maxHeight:isMobile?"none":"calc(100vh - 120px)" }}>
+                  <div style={{ width:isMobile?"100%":"48%", padding:isMobile?"16px":"24px", overflowY:"auto" }}>
 
                     {/* Empty state */}
                     {!result && !projectResults && !reviewing && !error && (
@@ -511,10 +514,10 @@ export default function App() {
                           </div>
                           <div style={{ display:"flex", gap:12, flexWrap:"wrap" }}>
                             {[
-                              { label:"Critical", count:projectResults.criticals.length,   color:"#f87171" },
-                              { label:"Warnings", count:projectResults.warnings.length,    color:"#fbbf24" },
-                              { label:"Security", count:projectResults.securityIssues.length, color:"#fb923c" },
-                              { label:"Suggestions", count:projectResults.suggestions.length, color:"#60a5fa" },
+                              { label:"Critical",    count:projectResults.criticals.length,      color:"#f87171" },
+                              { label:"Warnings",    count:projectResults.warnings.length,       color:"#fbbf24" },
+                              { label:"Security",    count:projectResults.securityIssues.length, color:"#fb923c" },
+                              { label:"Suggestions", count:projectResults.suggestions.length,    color:"#60a5fa" },
                             ].map(({ label, count, color }) => (
                               <div key={label} style={{ background: isDark?"rgba(255,255,255,0.03)":"rgba(0,0,0,0.04)", borderRadius:8, padding:"8px 14px", textAlign:"center" }}>
                                 <div style={{ fontSize:20, fontWeight:800, color, fontFamily:"'Bricolage Grotesque',sans-serif" }}>{count}</div>
@@ -563,12 +566,13 @@ export default function App() {
                 )}
               </div>
             </div>
+            <HelpPanel tab="review" isDark={isDark} />
           </>
         )}
       </main>
 
       {/* ── Mobile Bottom Nav ── */}
-      <nav className="mobile-only" style={{ position:"fixed", bottom:0, left:0, right:0, background: isDark?"rgba(7,8,15,0.97)":"rgba(255,255,255,0.97)", backdropFilter:"blur(16px)", borderTop:"1px solid "+border, display:"flex", zIndex:100, paddingBottom:"env(safe-area-inset-bottom)" }}>
+      <nav className="mobile-only" style={{ position:"fixed", bottom:0, left:0, right:0, background: isDark?"rgba(7,8,15,0.97)":"rgba(255,255,255,0.97)", backdropFilter:"blur(16px)", borderTop:"1px solid "+border, zIndex:100, paddingBottom:"env(safe-area-inset-bottom)" }}>
         {TABS.map(tab => (
           <button key={tab.id} className={`cc-tab-btn ${activeTab===tab.id?"active":""}`} onClick={() => setActiveTab(tab.id)}>
             <span className="tab-icon">{tab.icon}</span>
