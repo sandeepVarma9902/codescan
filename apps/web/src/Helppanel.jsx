@@ -5,7 +5,7 @@
  *
  * Props:
  *   tab      — "review" | "mips" | "devtools"
- *   tool     — (devtools only) active tool id e.g. "diff", "hipaa"
+ *   tool     — (devtools only) active tool id e.g. "diff", "hipaa", "rcm"
  *   isDark   — boolean
  */
 
@@ -49,7 +49,7 @@ Answer questions about how to use the MIPS Expert, what MIPS measures are, how t
   devtools: `You are the CareCode in-app assistant for the Dev Tools tab.
 CareCode is an AI tool for healthcare engineers.
 
-The Dev Tools tab has 13 specialised AI tools:
+The Dev Tools tab has 14 specialised AI tools:
 
 QUICK TOOLS:
 - Git Diff: paste git diff output → line-by-line code review of changed lines only
@@ -69,6 +69,23 @@ EHR / COMPLIANCE:
 - HIPAA Checker: paste backend code → PHI exposure, access control, audit gaps
 - FHIR Validator: paste FHIR JSON/HL7 → spec violations, corrected resource
 - API Contract: paste OpenAPI/Swagger → security issues, design problems, improvements
+- RCM Autonomous: full autonomous Revenue Cycle Management with 4 analysis modes AND 3 input methods:
+
+  INPUT METHODS (tabs in the left pane):
+  • 📝 Paste — type or paste any clinical/billing text directly
+  • 📋 Form — structured guided form per mode (patient info, diagnosis, insurance fields, etc.)
+  • 📷 Scan / PDF — upload an image (OCR extracts text) or a multi-page PDF (all pages extracted automatically). Handles handwritten notes, scanned EOBs, and exported EHR documents.
+
+  ANALYSIS MODES (pills in the header):
+  • Claim Coding — clinical note → ICD-10-CM + CPT codes, modifiers, E&M level, NCCI flags, clean claim checklist
+  • Denial Analysis — EOB/remittance/denial letter → CARC/RARC classification, root cause, appeal letter, corrective actions
+  • Prior Auth — clinical notes + procedure → PA request letter, InterQual criteria, peer-to-peer talking points, approval probability
+  • Eligibility — benefits data → patient responsibility estimate, deductible/OOP breakdown, COB flags, collection strategy
+
+  ADDITIONAL FEATURES:
+  • Non-standard or proprietary FHIR/HL7 input → 🔧 Normalize button auto-converts to valid FHIR R4 before analysis
+  • 📄 Download PDF — exports the full analysis result as a formatted PDF report
+  • 📁 Load File / drag-drop — load any text, PDF, or image file directly into the tool
 
 Each tool has a Load File button to upload files directly. Results can be copied with the Copy button.
 
@@ -94,6 +111,12 @@ const SUGGESTIONS = {
     "What's the best way to use the HIPAA Checker?",
     "How do I paste multiple files for Architecture?",
     "Which tool should I use for finding secrets?",
+    "Can RCM Autonomous scan a handwritten clinical note?",
+    "How do I upload a multi-page EOB for Denial Analysis?",
+    "Can I download my RCM analysis as a PDF?",
+    "What does the Normalize button do for FHIR/HL7?",
+    "How do I use the RCM Form mode?",
+    "What's the difference between Denial Analysis and Prior Auth?",
   ],
 };
 
@@ -101,16 +124,16 @@ const TOOL_LABELS = {
   diff:"Git Diff", explain:"Explainer", refactor:"Refactor", testgen:"Test Generator",
   docwrite:"Doc Writer", sql:"SQL Reviewer", secrets:"Secret Scanner", deps:"Dep Auditor",
   regex:"Regex Explainer", arch:"Architecture", hipaa:"HIPAA Checker", fhir:"FHIR Validator",
-  apicon:"API Contract",
+  apicon:"API Contract", rcm:"RCM Autonomous",
 };
 
 export default function HelpPanel({ tab = "review", tool = null, isDark = true }) {
-  const [open, setOpen]       = useState(false);
+  const [open, setOpen]         = useState(false);
   const [messages, setMessages] = useState([]);
-  const [input, setInput]     = useState("");
-  const [loading, setLoading] = useState(false);
-  const bottomRef             = useRef(null);
-  const inputRef              = useRef(null);
+  const [input, setInput]       = useState("");
+  const [loading, setLoading]   = useState(false);
+  const bottomRef               = useRef(null);
+  const inputRef                = useRef(null);
 
   const T = {
     bg:       isDark ? "#0d0f1a" : "#ffffff",
@@ -272,24 +295,19 @@ export default function HelpPanel({ tab = "review", tool = null, isDark = true }
                 borderRadius: m.role==="user" ? "14px 4px 14px 14px" : "4px 14px 14px 14px",
                 padding:"9px 13px",
                 fontSize:13, color: m.role==="user" ? "#fff" : T.textSub,
-                lineHeight:1.65,
-                whiteSpace:"pre-wrap",
-                wordBreak:"break-word",
+                lineHeight:1.6,
               }}>
                 {m.content}
               </div>
             </div>
           ))}
 
-          {/* Loading dots */}
+          {/* Loading indicator */}
           {loading && (
             <div style={{ display:"flex", gap:8, alignItems:"flex-end" }}>
-              <div style={{ width:22, height:22, borderRadius:6, background:"rgba(6,182,212,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11 }}>⚡</div>
-              <div style={{ background:T.botBg, borderRadius:"4px 14px 14px 14px", padding:"10px 14px", display:"flex", gap:5, alignItems:"center" }}>
-                {[0,1,2].map(i => (
-                  <div key={i} style={{ width:6, height:6, borderRadius:"50%", background:T.muted, animation:`hp-dot 1.2s ease-in-out ${i*0.2}s infinite` }} />
-                ))}
-                <style>{`@keyframes hp-dot { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-5px)} }`}</style>
+              <div style={{ width:22, height:22, borderRadius:6, background:"rgba(6,182,212,0.15)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, flexShrink:0 }}>⚡</div>
+              <div style={{ background:T.botBg, borderRadius:"4px 14px 14px 14px", padding:"10px 14px", fontSize:13, color:T.textSub }}>
+                <span className="hp-spin">⚡</span> Thinking...
               </div>
             </div>
           )}
@@ -297,8 +315,8 @@ export default function HelpPanel({ tab = "review", tool = null, isDark = true }
           <div ref={bottomRef} />
         </div>
 
-        {/* Input bar */}
-        <div style={{ padding:"10px 12px", borderTop:"1px solid " + T.border, background:T.surface, display:"flex", gap:8, alignItems:"flex-end", flexShrink:0 }}>
+        {/* Input */}
+        <div style={{ padding:"12px 14px", borderTop:"1px solid " + T.border, background:T.surface, display:"flex", gap:8, alignItems:"flex-end", flexShrink:0 }}>
           <textarea
             ref={inputRef}
             className="hp-input"
@@ -306,12 +324,11 @@ export default function HelpPanel({ tab = "review", tool = null, isDark = true }
             placeholder="Ask a question..."
             value={input}
             onChange={e => setInput(e.target.value)}
-            onKeyDown={e => { if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-            onInput={e => { e.target.style.height="auto"; e.target.style.height=Math.min(e.target.scrollHeight, 90)+"px"; }}
-            style={{ minHeight:36, maxHeight:90 }}
+            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+            style={{ flex:1 }}
           />
-          <button className="hp-send" onClick={() => send()} disabled={loading || !input.trim()}>
-            {loading ? <span className="hp-spin">⚡</span> : "→"}
+          <button className="hp-send" onClick={() => send()} disabled={!input.trim() || loading}>
+            ➤
           </button>
         </div>
       </div>
