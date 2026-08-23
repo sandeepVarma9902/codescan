@@ -140,7 +140,17 @@ curl http://127.0.0.1:8787/v1/jobs/JOB_ID \
 
 `GET /healthz` is unauthenticated for load balancers. API jobs require bearer authentication. GitHub `repository_dispatch` webhooks require an exact `X-Hub-Signature-256` HMAC signature. State is persisted atomically with owner-only file permissions.
 
-GitHub repository jobs currently transition to `awaiting-github-app`. The service deliberately does not accept repository tokens in API payloads. The next provider adapter must exchange a signed GitHub App JWT for a short-lived installation token, clone into a disposable workspace, push the migration branch, and open the PR.
+Configure GitHub App delivery with:
+
+```bash
+export GITHUB_APP_ID='123456'
+export GITHUB_APP_PRIVATE_KEY='-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----'
+export MODERNIZER_WORK_ROOT='/srv/modernizer/work'
+```
+
+The GitHub App requires repository contents read/write and pull requests read/write permissions. Repository dispatch payloads supply the installation ID; the service signs a short-lived App JWT, exchanges it for an installation token, clones only the requested `owner/repository`, creates a `repo-upgrader/<target>-<job>` branch, runs the migration, pushes, opens the PR, and removes the workspace in a `finally` cleanup.
+
+Repository credentials are never accepted in API payloads, written to disk, placed in clone URLs, or returned in reports. The installation token is passed to Git through a temporary `GIT_ASKPASS` helper and removed with the disposable workspace. When GitHub App configuration is absent, remote jobs transition safely to `awaiting-github-app`.
 
 ## Product roadmap
 
