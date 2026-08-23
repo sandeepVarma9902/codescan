@@ -207,6 +207,24 @@ export MODERNIZER_BILLING_WEBHOOK_SECRET='whsec_replace_me'
 
 The webhook accepts `customer.subscription.created`, `customer.subscription.updated`, and `customer.subscription.deleted`. Subscription metadata must contain `accountId` and `plan` (`free`, `starter`, `pro`, or `enterprise`). Signatures cover the exact request body and timestamp, expire after five minutes, and are compared in constant time. Applied event IDs are persisted for replay protection. Active subscription plans immediately override the API key's configured fallback plan; cancellation or an inactive subscription safely returns the account to Free.
 
+### Organization policies and analytics
+
+Version 1.3 adds account-level guardrails for enterprise customers. Policies can restrict repository owners, migration targets, execution environments, and repair attempts:
+
+```bash
+export MODERNIZER_ACCOUNT_POLICIES_JSON='[
+  {
+    "accountId":"customer-a",
+    "allowedRepositories":["customer-a/*","shared/design-system"],
+    "allowedTargets":["vite","nextjs"],
+    "allowedExecutors":["docker"],
+    "maxRepairAttempts":1
+  }
+]'
+```
+
+Policy enforcement occurs before a job is created or metered. Repository patterns support exact `owner/repository` values or an `owner/*` wildcard. Customers can query `GET /v1/analytics` for tenant-isolated totals, completion and success rates, average execution duration, and per-target outcomes. Administrators receive the aggregate view.
+
 Submit and inspect a job:
 
 ```bash
