@@ -6,23 +6,27 @@ import { jobFromGitHubDispatch, verifyGitHubSignature } from './github-webhook.j
 import { GitHubAppClient } from './github-app.js';
 import { GitHubDelivery } from './github-delivery.js';
 import { ApiKeyRegistry, assertEntitled } from './auth.js';
+import { AccountStore } from './account-store.js';
+import { billingUpdateFromEvent, verifyBillingSignature } from './billing-webhook.js';
 
 export async function startService(options = {}) {
-  const auth = options.auth || ApiKeyRegistry.fromEnvironment(options);
+  const accountStore = options.accountStore || await new AccountStore(options.accountStoreFile || path.resolve('.modernizer-service/accounts.json')).load();
+  const auth = options.auth || ApiKeyRegistry.fromEnvironment({ ...options, planResolver: (accountId, fallback) => accountStore.getPlan(accountId, fallback) });
   const store = options.store || await new JobStore(options.storeFile || path.resolve('.modernizer-service/jobs.json')).load();
   const githubDelivery = options.githubDelivery || createGitHubDelivery(options);
   const worker = options.worker || new JobWorker({ store, githubDelivery, allowedRepositoryRoot: options.allowedRepositoryRoot ?? process.env.MODERNIZER_ALLOWED_REPO_ROOT, concurrency: options.concurrency ?? process.env.MODERNIZER_CONCURRENCY });
   if (!options.worker) worker.resumeQueued();
-  const server = http.createServer((request, response) => route(request, response, { auth, store, worker, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET }));
+  const server = http.createServer((request, response) => route(request, response, { auth, store, worker, accountStore, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
   const port = options.port ?? (Number(process.env.MODERNIZER_PORT) || 8787);
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, options.host || '127.0.0.1', resolve); });
-  return { server, store, worker, address: server.address() };
+  return { server, store, worker, accountStore, address: server.address() };
 }
 
 async function route(request, response, context) {
   try {
     if (request.method === 'GET' && request.url === '/healthz') return json(response, 200, { status: 'ok' });
     if (request.method === 'POST' && request.url === '/webhooks/github') return githubWebhook(request, response, context);
+    if (request.method === 'POST' && request.url === '/webhooks/billing') return billingWebhook(request, response, context);
     const principal = context.auth.authenticate(request.headers.authorization);
     if (!principal) return json(response, 401, { error: 'unauthorized' });
     if (request.method === 'POST' && request.url === '/v1/jobs') {
@@ -48,6 +52,15 @@ async function route(request, response, context) {
     if (match) { const job = ownedJob(context.store, match[1], principal); return job ? json(response, 200, job) : json(response, 404, { error: 'not_found' }); }
     return json(response, 404, { error: 'not_found' });
   } catch (error) { return json(response, error.statusCode || 400, { error: error.message }); }
+}
+
+async function billingWebhook(request, response, context) {
+  const raw = await rawBody(request);
+  if (!verifyBillingSignature(raw, request.headers['billing-signature'], context.billingSecret)) return json(response, 401, { error: 'invalid_signature' });
+  const update = billingUpdateFromEvent(JSON.parse(raw));
+  if (!update) return json(response, 202, { accepted: false });
+  const result = await context.accountStore.apply(update);
+  return json(response, 200, { accepted: true, accountId: update.accountId, plan: update.plan, deduplicated: result.deduplicated });
 }
 
 async function githubWebhook(request, response, context) {
