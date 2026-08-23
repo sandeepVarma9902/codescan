@@ -10,21 +10,23 @@ import { AccountStore } from './account-store.js';
 import { billingUpdateFromEvent, verifyBillingSignature } from './billing-webhook.js';
 import { assertPolicy, PolicyRegistry } from './policy.js';
 import { CompositeAuth, CredentialStore } from './credential-store.js';
+import { AuditLog } from './audit-log.js';
 
 export async function startService(options = {}) {
   const accountStore = options.accountStore || await new AccountStore(options.accountStoreFile || path.resolve('.modernizer-service/accounts.json')).load();
   const policies = options.policyRegistry || PolicyRegistry.fromEnvironment(options);
   const planResolver = (accountId, fallback) => accountStore.getPlan(accountId, fallback);
   const credentialStore = options.credentialStore || await new CredentialStore(options.credentialStoreFile || path.resolve('.modernizer-service/credentials.json'), { planResolver }).load();
+  const auditLog = options.auditLog || await new AuditLog(options.auditFile || path.resolve('.modernizer-service/audit.jsonl')).load();
   const auth = options.auth || new CompositeAuth(ApiKeyRegistry.fromEnvironment({ ...options, planResolver }), credentialStore);
   const store = options.store || await new JobStore(options.storeFile || path.resolve('.modernizer-service/jobs.json')).load();
   const githubDelivery = options.githubDelivery || createGitHubDelivery(options);
   const worker = options.worker || new JobWorker({ store, githubDelivery, allowedRepositoryRoot: options.allowedRepositoryRoot ?? process.env.MODERNIZER_ALLOWED_REPO_ROOT, concurrency: options.concurrency ?? process.env.MODERNIZER_CONCURRENCY });
   if (!options.worker) worker.resumeQueued();
-  const server = http.createServer((request, response) => route(request, response, { auth, store, worker, accountStore, credentialStore, policies, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
+  const server = http.createServer((request, response) => route(request, response, { auth, store, worker, accountStore, credentialStore, auditLog, policies, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
   const port = options.port ?? (Number(process.env.MODERNIZER_PORT) || 8787);
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, options.host || '127.0.0.1', resolve); });
-  return { server, store, worker, accountStore, credentialStore, address: server.address() };
+  return { server, store, worker, accountStore, credentialStore, auditLog, address: server.address() };
 }
 
 async function route(request, response, context) {
@@ -38,6 +40,7 @@ async function route(request, response, context) {
       requireAdmin(principal);
       const input = await body(request);
       const result = await context.credentialStore.create({ accountId: input.accountId, plan: input.plan, role: input.role, name: input.name });
+      await audit(context, principal, 'credential.created', 'credential', result.credential.id, { targetAccountId: input.accountId, role: result.credential.role });
       return json(response, 201, result);
     }
     if (request.method === 'GET' && request.url === '/v1/api-keys') {
@@ -46,7 +49,12 @@ async function route(request, response, context) {
     const revokeKey = request.method === 'DELETE' && request.url?.match(/^\/v1\/api-keys\/([a-f0-9-]+)$/i);
     if (revokeKey) {
       const credential = await context.credentialStore.revoke(revokeKey[1], scope(principal));
+      if (credential) await audit(context, principal, 'credential.revoked', 'credential', credential.id, { targetAccountId: credential.accountId });
       return credential ? json(response, 200, credential) : json(response, 404, { error: 'not_found' });
+    }
+    if (request.method === 'GET' && request.url?.startsWith('/v1/audit-events')) {
+      const url = new URL(request.url, 'http://service');
+      return json(response, 200, { events: context.auditLog.list({ accountId: scope(principal), action: url.searchParams.get('action') || undefined, limit: url.searchParams.get('limit') }) });
     }
     if (request.method === 'POST' && request.url === '/v1/jobs') {
       const input = validateJob(await body(request));
@@ -57,7 +65,10 @@ async function route(request, response, context) {
       assertEntitled(principal, input.target, context.store.usage(principal.accountId));
       assertPolicy(context.policies.get(principal.accountId), input);
       const result = await context.store.createOrGet({ source: 'api', accountId: principal.accountId, plan: principal.plan, ...input }, idempotencyKey);
-      if (result.created) context.worker.enqueue(result.job);
+      if (result.created) {
+        await audit(context, principal, 'migration.submitted', 'job', result.job.id, { target: result.job.target, repository: result.job.repository?.fullName || null });
+        context.worker.enqueue(result.job);
+      }
       return json(response, result.created ? 202 : 200, { ...result.job, deduplicated: !result.created });
     }
     if (request.method === 'GET' && request.url?.startsWith('/v1/jobs?')) {
@@ -68,7 +79,7 @@ async function route(request, response, context) {
     if (request.method === 'GET' && request.url === '/v1/usage') return json(response, 200, { plan: principal.plan, entitlements: principal.entitlements, ...context.store.usage(scope(principal)) });
     if (request.method === 'GET' && request.url === '/v1/analytics') return json(response, 200, context.store.analytics(scope(principal)));
     const cancel = request.method === 'DELETE' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)$/i);
-    if (cancel) { const existing = ownedJob(context.store, cancel[1], principal); if (!existing) return json(response, 404, { error: 'not_found' }); return json(response, 200, await context.store.cancel(cancel[1])); }
+    if (cancel) { const existing = ownedJob(context.store, cancel[1], principal); if (!existing) return json(response, 404, { error: 'not_found' }); const cancelled = await context.store.cancel(cancel[1]); await audit(context, principal, 'migration.cancelled', 'job', cancelled.id, { target: cancelled.target }); return json(response, 200, cancelled); }
     const match = request.method === 'GET' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)$/i);
     if (match) { const job = ownedJob(context.store, match[1], principal); return job ? json(response, 200, job) : json(response, 404, { error: 'not_found' }); }
     return json(response, 404, { error: 'not_found' });
@@ -81,6 +92,7 @@ async function billingWebhook(request, response, context) {
   const update = billingUpdateFromEvent(JSON.parse(raw));
   if (!update) return json(response, 202, { accepted: false });
   const result = await context.accountStore.apply(update);
+  if (!result.deduplicated) await context.auditLog.record({ accountId: update.accountId, actorId: 'billing-webhook', action: 'subscription.updated', resourceType: 'account', resourceId: update.accountId, metadata: { plan: update.plan, status: update.status } });
   return json(response, 200, { accepted: true, accountId: update.accountId, plan: update.plan, deduplicated: result.deduplicated });
 }
 
@@ -108,6 +120,7 @@ function validateJob(input) {
 
 function scope(principal) { return principal.role === 'admin' ? undefined : principal.accountId; }
 function requireAdmin(principal) { if (principal.role !== 'admin') { const error = new Error('Administrator access is required.'); error.statusCode = 403; throw error; } }
+function audit(context, principal, action, resourceType, resourceId, metadata) { return context.auditLog.record({ accountId: principal.accountId, actorId: principal.credentialId || principal.role, action, resourceType, resourceId, metadata }); }
 function ownedJob(store, id, principal) { const job = store.get(id); return job && (principal.role === 'admin' || job.accountId === principal.accountId) ? job : null; }
 async function body(request) { return JSON.parse(await rawBody(request)); }
 async function rawBody(request) { const chunks = []; for await (const chunk of request) chunks.push(chunk); const value = Buffer.concat(chunks); if (value.length > 1024 * 1024) throw new Error('Payload too large.'); return value; }
