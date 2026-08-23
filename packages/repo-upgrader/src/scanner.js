@@ -35,7 +35,7 @@ export async function scanRepository(root) {
   if (await exists(path.join(absoluteRoot, 'src', 'serviceWorker.js')) || await exists(path.join(absoluteRoot, 'src', 'service-worker.js'))) riskFindings.push(finding('service-worker', 'warning', 'src/', 'Service-worker behavior requires manual verification after migration.'));
   const risk = summarizeRisk(riskFindings);
   const nextjs = analyzeNextReadiness(sourceRecords, dependencies);
-  const reactNative = analyzeReactNativeReadiness(sourceRecords, dependencies);
+  const reactNative = analyzeReactNativeReadiness(sourceRecords.filter(({ file }) => /^src\/.*\.[jt]sx?$/.test(file)), dependencies);
   return {
     schemaVersion: 1,
     scannedAt: new Date().toISOString(),

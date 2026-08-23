@@ -1,13 +1,14 @@
 export function createPlan(scan, target = 'vite') {
   if (target === 'react-native') {
     const analysis = scan.reactNative;
+    const eligible = analysis?.automaticConversionEligible === true;
     return {
       schemaVersion: 1,
       migration: 'react-to-react-native',
       status: 'analysis-ready',
-      supported: false,
+      supported: eligible,
       strategy: 'expo-router-incremental-conversion',
-      reason: 'Automated mutation remains gated until native navigation, styling, platform API, interaction, and device-test decisions are approved.',
+      reason: eligible ? 'Eligible for a conservative Expo Router conversion of safe structural and text components.' : 'Automated mutation remains gated until native navigation, styling, platform API, interaction, and device-test decisions are approved.',
       readiness: analysis?.readiness,
       framework: analysis?.recommendedFramework || 'expo-router',
       componentMappings: analysis?.components || [],

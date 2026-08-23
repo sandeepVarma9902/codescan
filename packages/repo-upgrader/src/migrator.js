@@ -6,18 +6,19 @@ import { transformCraToVite } from './transform.js';
 import { verify } from './verifier.js';
 import { applyDeterministicRepairs } from './repair.js';
 import { transformReactToNext } from './nextjs-transform.js';
+import { transformReactToNative } from './react-native-transform.js';
 import { STATE_DIR, writeJson } from './utils.js';
 
 export async function migrate(root, options = {}) {
   const resolved = path.resolve(root);
   const scan = await scanRepository(resolved);
   const plan = createPlan(scan, options.target || 'vite');
-  if ((options.target || 'vite') === 'react-native') throw new Error('React Native conversion is analysis-only in v0.9; run plan --target react-native and satisfy its native-platform gates first.');
+  if ((options.target || 'vite') === 'react-native' && !plan.supported) throw new Error('React Native conversion is limited to automatically eligible projects; resolve every blocker and non-infrastructure warning first.');
   if (!plan.supported && !options.force) throw new Error(`${plan.reason || plan.preconditions.join('; ')} Use --force only after reviewing the reported risks.`);
   const checkpointId = await createCheckpoint(resolved);
   const report = { schemaVersion: 1, startedAt: new Date().toISOString(), migration: plan.migration, status: 'running', checkpointId, forced: Boolean(options.force), executionPolicy: { executor: options.executor || 'local', timeoutMs: options.timeoutMs || 600000, maxRepairAttempts: options.maxRepairAttempts || 0 }, scan, plan, changes: [], repairs: [], verificationRuns: [], verification: null };
   try {
-    report.changes = targetTransform(options.target || 'vite') === 'nextjs' ? await transformReactToNext(resolved) : await transformCraToVite(resolved);
+    report.changes = await transformFor(options.target || 'vite', resolved);
     const maxRepairs = Math.max(0, Math.min(Number(options.maxRepairAttempts) || 0, 3));
     for (let attempt = 0; attempt <= maxRepairs; attempt += 1) {
       report.verification = await verify(resolved, scan.project.packageManager, options);
@@ -44,4 +45,8 @@ export async function migrate(root, options = {}) {
   return report;
 }
 
-function targetTransform(target) { return target === 'nextjs' ? 'nextjs' : 'vite'; }
+function transformFor(target, root) {
+  if (target === 'nextjs') return transformReactToNext(root);
+  if (target === 'react-native') return transformReactToNative(root);
+  return transformCraToVite(root);
+}
