@@ -9,19 +9,22 @@ import { ApiKeyRegistry, assertEntitled } from './auth.js';
 import { AccountStore } from './account-store.js';
 import { billingUpdateFromEvent, verifyBillingSignature } from './billing-webhook.js';
 import { assertPolicy, PolicyRegistry } from './policy.js';
+import { CompositeAuth, CredentialStore } from './credential-store.js';
 
 export async function startService(options = {}) {
   const accountStore = options.accountStore || await new AccountStore(options.accountStoreFile || path.resolve('.modernizer-service/accounts.json')).load();
   const policies = options.policyRegistry || PolicyRegistry.fromEnvironment(options);
-  const auth = options.auth || ApiKeyRegistry.fromEnvironment({ ...options, planResolver: (accountId, fallback) => accountStore.getPlan(accountId, fallback) });
+  const planResolver = (accountId, fallback) => accountStore.getPlan(accountId, fallback);
+  const credentialStore = options.credentialStore || await new CredentialStore(options.credentialStoreFile || path.resolve('.modernizer-service/credentials.json'), { planResolver }).load();
+  const auth = options.auth || new CompositeAuth(ApiKeyRegistry.fromEnvironment({ ...options, planResolver }), credentialStore);
   const store = options.store || await new JobStore(options.storeFile || path.resolve('.modernizer-service/jobs.json')).load();
   const githubDelivery = options.githubDelivery || createGitHubDelivery(options);
   const worker = options.worker || new JobWorker({ store, githubDelivery, allowedRepositoryRoot: options.allowedRepositoryRoot ?? process.env.MODERNIZER_ALLOWED_REPO_ROOT, concurrency: options.concurrency ?? process.env.MODERNIZER_CONCURRENCY });
   if (!options.worker) worker.resumeQueued();
-  const server = http.createServer((request, response) => route(request, response, { auth, store, worker, accountStore, policies, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
+  const server = http.createServer((request, response) => route(request, response, { auth, store, worker, accountStore, credentialStore, policies, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
   const port = options.port ?? (Number(process.env.MODERNIZER_PORT) || 8787);
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, options.host || '127.0.0.1', resolve); });
-  return { server, store, worker, accountStore, address: server.address() };
+  return { server, store, worker, accountStore, credentialStore, address: server.address() };
 }
 
 async function route(request, response, context) {
@@ -31,6 +34,20 @@ async function route(request, response, context) {
     if (request.method === 'POST' && request.url === '/webhooks/billing') return billingWebhook(request, response, context);
     const principal = context.auth.authenticate(request.headers.authorization);
     if (!principal) return json(response, 401, { error: 'unauthorized' });
+    if (request.method === 'POST' && request.url === '/v1/api-keys') {
+      requireAdmin(principal);
+      const input = await body(request);
+      const result = await context.credentialStore.create({ accountId: input.accountId, plan: input.plan, role: input.role, name: input.name });
+      return json(response, 201, result);
+    }
+    if (request.method === 'GET' && request.url === '/v1/api-keys') {
+      return json(response, 200, { credentials: context.credentialStore.list(scope(principal)) });
+    }
+    const revokeKey = request.method === 'DELETE' && request.url?.match(/^\/v1\/api-keys\/([a-f0-9-]+)$/i);
+    if (revokeKey) {
+      const credential = await context.credentialStore.revoke(revokeKey[1], scope(principal));
+      return credential ? json(response, 200, credential) : json(response, 404, { error: 'not_found' });
+    }
     if (request.method === 'POST' && request.url === '/v1/jobs') {
       const input = validateJob(await body(request));
       const idempotencyKey = request.headers['idempotency-key'];
@@ -90,6 +107,7 @@ function validateJob(input) {
 }
 
 function scope(principal) { return principal.role === 'admin' ? undefined : principal.accountId; }
+function requireAdmin(principal) { if (principal.role !== 'admin') { const error = new Error('Administrator access is required.'); error.statusCode = 403; throw error; } }
 function ownedJob(store, id, principal) { const job = store.get(id); return job && (principal.role === 'admin' || job.accountId === principal.accountId) ? job : null; }
 async function body(request) { return JSON.parse(await rawBody(request)); }
 async function rawBody(request) { const chunks = []; for await (const chunk of request) chunks.push(chunk); const value = Buffer.concat(chunks); if (value.length > 1024 * 1024) throw new Error('Payload too large.'); return value; }

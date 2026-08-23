@@ -225,6 +225,19 @@ export MODERNIZER_ACCOUNT_POLICIES_JSON='[
 
 Policy enforcement occurs before a job is created or metered. Repository patterns support exact `owner/repository` values or an `owner/*` wildcard. Customers can query `GET /v1/analytics` for tenant-isolated totals, completion and success rates, average execution duration, and per-target outcomes. Administrators receive the aggregate view.
 
+### Managed API keys
+
+Version 1.4 removes the operational dependency on environment-only customer credentials. A bootstrap administrator can create managed keys through `POST /v1/api-keys`, list their safe metadata with `GET /v1/api-keys`, and revoke them with `DELETE /v1/api-keys/:id`.
+
+```bash
+curl -X POST http://127.0.0.1:8787/v1/api-keys \
+  -H "Authorization: Bearer $MODERNIZER_API_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"accountId":"customer-a","plan":"starter","role":"member","name":"Production CI"}'
+```
+
+The complete `ru_live_...` secret is returned only by the creation response. Only its SHA-256 digest and a short display prefix are persisted. Generated keys contain 192 bits of randomness, revocation takes effect immediately, and list responses never expose credential digests. Environment-configured keys remain available as bootstrap or break-glass credentials.
+
 Submit and inspect a job:
 
 ```bash
