@@ -10,9 +10,15 @@ export class JobWorker {
     this.webhooks = webhooks;
     this.queue = [];
     this.active = 0;
+    this.accepting = true;
+    this.idleWaiters = [];
   }
 
-  enqueue(job) { this.queue.push(job.id); queueMicrotask(() => this.drain()); }
+  enqueue(job) {
+    if (!this.accepting) throw new Error('Worker is shutting down.');
+    this.queue.push(job.id);
+    queueMicrotask(() => this.drain());
+  }
 
   resumeQueued() { for (const job of this.store.list({ status: 'queued', limit: 100 })) this.enqueue(job); }
 
@@ -20,7 +26,7 @@ export class JobWorker {
     while (this.active < this.concurrency && this.queue.length) {
       const id = this.queue.shift();
       this.active += 1;
-      this.run(id).finally(() => { this.active -= 1; this.drain(); });
+      this.run(id).finally(() => { this.active -= 1; this.drain(); this.resolveIdle(); });
     }
   }
 
@@ -52,6 +58,24 @@ export class JobWorker {
     const job = await this.store.update(id, patch);
     if (this.webhooks && ['running', 'succeeded', 'failed'].includes(job.status)) await this.webhooks.dispatch(`migration.${job.status}`, job);
     return job;
+  }
+
+  status() { return { accepting: this.accepting, active: this.active, queued: this.queue.length }; }
+
+  async shutdown({ timeoutMs = 30_000 } = {}) {
+    this.accepting = false;
+    if (this.active === 0 && this.queue.length === 0) return true;
+    let timeout;
+    const idle = new Promise((resolve) => this.idleWaiters.push(resolve));
+    const expired = new Promise((resolve) => { timeout = setTimeout(() => resolve(false), timeoutMs); timeout.unref?.(); });
+    const result = await Promise.race([idle.then(() => true), expired]);
+    clearTimeout(timeout);
+    return result;
+  }
+
+  resolveIdle() {
+    if (this.active || this.queue.length) return;
+    for (const resolve of this.idleWaiters.splice(0)) resolve();
   }
 }
 
