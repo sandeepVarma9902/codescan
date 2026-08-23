@@ -1,6 +1,6 @@
 {
   "name": "repo-upgrader",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Deterministic, verifiable React modernization CLI",
   "type": "module",
   "bin": {
@@ -8,7 +8,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "lint": "node --check bin/repo-upgrader.js && node --check src/*.js",
+    "lint": "node --check bin/repo-upgrader.js && node --check src/*.js src/service/*.js",
     "build": "node scripts/build.js"
   },
   "engines": {
