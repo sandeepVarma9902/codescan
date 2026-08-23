@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { exists, readJson, relative, walk } from './utils.js';
+import { analyzeNextReadiness } from './nextjs-analyzer.js';
 
 const SOURCE_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx', '.css', '.scss', '.html']);
 
@@ -21,8 +22,10 @@ export async function scanRepository(root) {
   for (const candidate of entryCandidates) if (await exists(path.join(absoluteRoot, candidate))) entrypoints.push(candidate);
   const envUsages = [];
   const riskFindings = [];
+  const sourceRecords = [];
   for (const file of sourceFiles) {
     const content = await fs.readFile(file, 'utf8');
+    sourceRecords.push({ file: relative(absoluteRoot, file), content });
     if (content.includes('process.env.REACT_APP_')) envUsages.push(relative(absoluteRoot, file));
     if (/process\.env\s*\[/.test(content)) riskFindings.push(finding('dynamic-env-access', 'warning', relative(absoluteRoot, file), 'Dynamic process.env access cannot be safely renamed.'));
   }
@@ -30,6 +33,7 @@ export async function scanRepository(root) {
   if (await exists(path.join(absoluteRoot, 'src', 'setupProxy.js'))) riskFindings.push(finding('development-proxy', 'warning', 'src/setupProxy.js', 'CRA proxy middleware must be translated to Vite server.proxy.'));
   if (await exists(path.join(absoluteRoot, 'src', 'serviceWorker.js')) || await exists(path.join(absoluteRoot, 'src', 'service-worker.js'))) riskFindings.push(finding('service-worker', 'warning', 'src/', 'Service-worker behavior requires manual verification after migration.'));
   const risk = summarizeRisk(riskFindings);
+  const nextjs = analyzeNextReadiness(sourceRecords, dependencies);
   return {
     schemaVersion: 1,
     scannedAt: new Date().toISOString(),
@@ -43,8 +47,9 @@ export async function scanRepository(root) {
     entrypoints,
     envUsages,
     risk,
+    nextjs,
     inventory: { files: files.length, sourceFiles: sourceFiles.length },
-    capabilities: { craToVite: craSignals.length >= 2 && risk.blockers === 0, reactToNext: 'planned' }
+    capabilities: { craToVite: craSignals.length >= 2 && risk.blockers === 0, reactToNext: 'analysis-ready' }
   };
 }
 

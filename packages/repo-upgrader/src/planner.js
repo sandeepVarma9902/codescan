@@ -1,12 +1,19 @@
 export function createPlan(scan, target = 'vite') {
   if (target === 'nextjs') {
+    const analysis = scan.nextjs;
     return {
       schemaVersion: 1,
       migration: 'react-to-nextjs',
-      status: 'foundation-only',
+      status: analysis ? 'analysis-ready' : 'foundation-only',
       supported: false,
-      reason: 'Automated React to Next.js transforms are intentionally gated until routing and rendering semantics can be verified.',
-      phases: ['inventory routes and data fetching', 'classify SSR/client-only boundaries', 'generate App Router mapping', 'transform and verify incrementally']
+      reason: 'Automated transforms remain gated until route, rendering, data-fetching, and behavioral-test approvals are satisfied.',
+      readiness: analysis?.readiness,
+      routeMappings: analysis?.routes || [],
+      clientBoundaries: analysis?.clientBoundaries || [],
+      dataFetching: analysis?.dataFetching || [],
+      findings: analysis?.findings || [],
+      gates: analysis?.gates || [],
+      phases: ['approve route-to-App-Router mapping', 'establish root layout and providers', 'separate server and client component boundaries', 'move eligible data fetching to the server', 'transform routes incrementally', 'verify behavior and rendering']
     };
   }
   if (target !== 'vite') throw new Error(`Unsupported target: ${target}`);

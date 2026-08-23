@@ -59,3 +59,17 @@ test('transform migrates CRA tests and env contracts', async () => {
   assert.match(await fs.readFile(path.join(root, '.env'), 'utf8'), /^VITE_API=/);
   assert.match(await fs.readFile(path.join(root, 'vite.config.js'), 'utf8'), /environment: 'jsdom'/);
 });
+
+test('Next.js plan exposes readiness analysis while keeping transforms gated', async () => {
+  const root = await fixture();
+  const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json')));
+  pkg.dependencies['react-router-dom'] = '^6.0.0';
+  await fs.writeFile(path.join(root, 'package.json'), JSON.stringify(pkg));
+  await fs.writeFile(path.join(root, 'src/App.jsx'), `import { Routes, Route } from 'react-router-dom'; export const App = () => <Routes><Route path="/settings/:tab" element={<Settings />} /></Routes>;`);
+  const scan = await scanRepository(root);
+  const plan = createPlan(scan, 'nextjs');
+  assert.equal(plan.status, 'analysis-ready');
+  assert.equal(plan.supported, false);
+  assert.equal(plan.routeMappings[0].destination, 'app/settings/[tab]/page');
+  assert.ok(plan.gates.includes('behavioral tests available'));
+});
