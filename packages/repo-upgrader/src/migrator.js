@@ -12,6 +12,7 @@ export async function migrate(root, options = {}) {
   const resolved = path.resolve(root);
   const scan = await scanRepository(resolved);
   const plan = createPlan(scan, options.target || 'vite');
+  if ((options.target || 'vite') === 'react-native') throw new Error('React Native conversion is analysis-only in v0.9; run plan --target react-native and satisfy its native-platform gates first.');
   if (!plan.supported && !options.force) throw new Error(`${plan.reason || plan.preconditions.join('; ')} Use --force only after reviewing the reported risks.`);
   const checkpointId = await createCheckpoint(resolved);
   const report = { schemaVersion: 1, startedAt: new Date().toISOString(), migration: plan.migration, status: 'running', checkpointId, forced: Boolean(options.force), executionPolicy: { executor: options.executor || 'local', timeoutMs: options.timeoutMs || 600000, maxRepairAttempts: options.maxRepairAttempts || 0 }, scan, plan, changes: [], repairs: [], verificationRuns: [], verification: null };
