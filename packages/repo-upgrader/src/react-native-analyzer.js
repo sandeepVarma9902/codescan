@@ -20,6 +20,8 @@ export function analyzeReactNativeReadiness(sourceRecords, dependencies = {}) {
     if (/\bon(?:Drag|Drop|Mouse|Wheel|ContextMenu)\b/.test(content)) findings.push(finding('desktop-pointer-events', 'warning', file, 'Desktop pointer interactions require touch and gesture design.'));
     if (/\bclassName\s*=/.test(content)) findings.push(finding('css-class-styling', 'warning', file, 'CSS class styling must be converted to StyleSheet, NativeWind, or another native styling strategy.'));
     if (/\.(?:css|scss|sass|less)["']/.test(content)) findings.push(finding('stylesheet-import', 'warning', file, 'Web stylesheets cannot be consumed directly by native platforms.'));
+    const interactive = [...new Set(elements.filter((element) => ['button', 'input', 'textarea', 'img', 'a', 'ul', 'ol', 'form', 'select'].includes(element)))];
+    if (interactive.length) findings.push(finding('interactive-dom-semantics', 'blocker', file, `Interactive/media elements require behavior-aware recipes before conversion: ${interactive.join(', ')}.`));
     for (const match of content.matchAll(/<Route\b[^>]*\bpath\s*=\s*["']([^"']+)["']/g)) routeCandidates.push({ sourceFile: file, webPath: match[1], expoRoute: expoRoute(match[1]) });
     if (elements.length) components.push({ file, elements: mappings, suggestedFile: file.replace(/^src\//, 'components/').replace(/\.jsx?$/, '.tsx') });
   }
@@ -30,6 +32,7 @@ export function analyzeReactNativeReadiness(sourceRecords, dependencies = {}) {
   const blockers = findings.filter((item) => item.severity === 'blocker').length;
   const warnings = findings.filter((item) => item.severity === 'warning').length;
   const score = Math.max(0, 100 - blockers * 20 - warnings * 5);
+  const automaticWarnings = findings.filter((item) => item.severity === 'warning' && item.code !== 'web-dependency:react-dom');
   return {
     schemaVersion: 1,
     recommendedFramework: 'expo-router',
@@ -39,7 +42,8 @@ export function analyzeReactNativeReadiness(sourceRecords, dependencies = {}) {
     primitiveMappings: Object.entries(elementInventory).map(([from, count]) => ({ from, to: ELEMENT_MAP[from] || null, count })),
     routeCandidates,
     findings,
-    gates: ['native navigation approved', 'styling strategy approved', 'platform API adapters selected', 'touch interactions reviewed', 'iOS and Android behavioral tests available']
+    gates: ['native navigation approved', 'styling strategy approved', 'platform API adapters selected', 'touch interactions reviewed', 'iOS and Android behavioral tests available'],
+    automaticConversionEligible: blockers === 0 && automaticWarnings.length === 0
   };
 }
 
