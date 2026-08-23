@@ -60,6 +60,38 @@ test('transform migrates CRA tests and env contracts', async () => {
   assert.match(await fs.readFile(path.join(root, 'vite.config.js'), 'utf8'), /environment: 'jsdom'/);
 });
 
+test('scanner and transform preserve aliases and CRA SVG components', async () => {
+  const root = await fixture();
+  await fs.writeFile(path.join(root, 'jsconfig.json'), JSON.stringify({ compilerOptions: { baseUrl: 'src', paths: { '@/*': ['*'] } } }));
+  await fs.writeFile(path.join(root, 'src/App.jsx'), `import { ReactComponent as Logo } from './logo.svg'; export default () => <Logo />;`);
+  const scan = await scanRepository(root);
+  assert.equal(scan.craCompatibility.pathAliases, true);
+  assert.deepEqual(scan.craCompatibility.svgComponentImports, ['src/App.jsx']);
+  const plan = createPlan(scan);
+  assert.ok(plan.changes.some((change) => change.id === 'path-aliases'));
+  assert.ok(plan.changes.some((change) => change.id === 'svg-components'));
+  await transformCraToVite(root);
+  const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json')));
+  assert.ok(pkg.devDependencies['vite-tsconfig-paths']);
+  assert.ok(pkg.devDependencies['vite-plugin-svgr']);
+  assert.match(await fs.readFile(path.join(root, 'src/App.jsx'), 'utf8'), /Logo from '\.\/logo\.svg\?react'/);
+  assert.match(await fs.readFile(path.join(root, 'vite.config.js'), 'utf8'), /tsconfigPaths\(\).*svgr\(\)/);
+});
+
+test('conventional CRA proxy middleware becomes Vite server proxy', async () => {
+  const root = await fixture();
+  await fs.writeFile(path.join(root, 'src/setupProxy.js'), `const { createProxyMiddleware } = require('http-proxy-middleware'); module.exports = app => { app.use(createProxyMiddleware('/api', { target: 'https://api.example.test', changeOrigin: true })); };`);
+  const scan = await scanRepository(root);
+  assert.deepEqual(scan.craCompatibility.proxyRoutes, [{ path: '/api', target: 'https://api.example.test' }]);
+  assert.ok(createPlan(scan).changes.some((change) => change.id === 'development-proxy'));
+  await transformCraToVite(root);
+  const config = await fs.readFile(path.join(root, 'vite.config.js'), 'utf8');
+  assert.match(config, /"\/api".*https:\/\/api\.example\.test/);
+  await transformCraToVite(root);
+  assert.equal(await fs.readFile(path.join(root, 'vite.config.js'), 'utf8'), config);
+  await fs.access(path.join(root, 'src/setupProxy.js'));
+});
+
 test('Next.js plan exposes readiness analysis while keeping transforms gated', async () => {
   const root = await fixture();
   const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json')));

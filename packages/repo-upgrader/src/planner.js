@@ -46,6 +46,9 @@ export function createPlan(scan, target = 'vite') {
     { id: 'env-vars', action: 'rewrite REACT_APP_* access to VITE_*' },
     { id: 'cleanup', action: 'remove migrated CRA-only files' }
   ];
+  if (scan.craCompatibility?.pathAliases) changes.push({ id: 'path-aliases', action: 'preserve TypeScript/JavaScript path aliases with vite-tsconfig-paths' });
+  if (scan.craCompatibility?.svgComponentImports?.length) changes.push({ id: 'svg-components', action: 'convert CRA ReactComponent SVG imports with vite-plugin-svgr' });
+  if (scan.craCompatibility?.proxyRoutes?.length) changes.push({ id: 'development-proxy', action: 'translate conventional setupProxy routes to Vite server.proxy' });
   return {
     schemaVersion: 1,
     migration: 'cra-to-vite',
