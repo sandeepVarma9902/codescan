@@ -22,17 +22,21 @@ export async function scanRepository(root) {
   const entrypoints = [];
   for (const candidate of entryCandidates) if (await exists(path.join(absoluteRoot, candidate))) entrypoints.push(candidate);
   const envUsages = [];
+  const svgComponentImports = [];
   const riskFindings = [];
   const sourceRecords = [];
   for (const file of sourceFiles) {
     const content = await fs.readFile(file, 'utf8');
     sourceRecords.push({ file: relative(absoluteRoot, file), content });
     if (content.includes('process.env.REACT_APP_')) envUsages.push(relative(absoluteRoot, file));
+    if (/import\s*{\s*ReactComponent\s+as\s+\w+\s*}\s*from\s*['"][^'"]+\.svg['"]/.test(content)) svgComponentImports.push(relative(absoluteRoot, file));
     if (/process\.env\s*\[/.test(content)) riskFindings.push(finding('dynamic-env-access', 'warning', relative(absoluteRoot, file), 'Dynamic process.env access cannot be safely renamed.'));
   }
   if (dependencies['react-app-rewired'] || dependencies['@craco/craco']) riskFindings.push(finding('custom-webpack-overrides', 'blocker', 'package.json', 'CRACO/react-app-rewired configuration requires a dedicated compatibility recipe.'));
   if (await exists(path.join(absoluteRoot, 'src', 'setupProxy.js'))) riskFindings.push(finding('development-proxy', 'warning', 'src/setupProxy.js', 'CRA proxy middleware must be translated to Vite server.proxy.'));
   if (await exists(path.join(absoluteRoot, 'src', 'serviceWorker.js')) || await exists(path.join(absoluteRoot, 'src', 'service-worker.js'))) riskFindings.push(finding('service-worker', 'warning', 'src/', 'Service-worker behavior requires manual verification after migration.'));
+  const pathAliases = await hasPathAliases(absoluteRoot);
+  const proxyRoutes = await detectProxyRoutes(absoluteRoot);
   const risk = summarizeRisk(riskFindings);
   const nextjs = analyzeNextReadiness(sourceRecords, dependencies);
   const reactNative = analyzeReactNativeReadiness(sourceRecords.filter(({ file }) => /^src\/.*\.[jt]sx?$/.test(file)), dependencies);
@@ -48,12 +52,29 @@ export async function scanRepository(root) {
     scripts: pkg.scripts || {},
     entrypoints,
     envUsages,
+    craCompatibility: { pathAliases, svgComponentImports, proxyRoutes },
     risk,
     nextjs,
     reactNative,
     inventory: { files: files.length, sourceFiles: sourceFiles.length },
     capabilities: { craToVite: craSignals.length >= 2 && risk.blockers === 0, reactToNext: 'compatibility-bridge', reactToReactNative: 'analysis-ready' }
   };
+}
+
+async function hasPathAliases(root) {
+  for (const name of ['tsconfig.json', 'jsconfig.json']) {
+    const file = path.join(root, name);
+    if (!(await exists(file))) continue;
+    try { if (Object.keys((await readJson(file)).compilerOptions?.paths || {}).length) return true; } catch { return false; }
+  }
+  return false;
+}
+
+async function detectProxyRoutes(root) {
+  const file = path.join(root, 'src', 'setupProxy.js');
+  if (!(await exists(file))) return [];
+  const content = await fs.readFile(file, 'utf8');
+  return [...content.matchAll(/createProxyMiddleware\(\s*['"]([^'"]+)['"]\s*,\s*{[\s\S]*?target\s*:\s*['"]([^'"]+)['"]/g)].map((match) => ({ path: match[1], target: match[2] }));
 }
 
 function finding(code, severity, file, message) { return { code, severity, file, message }; }
