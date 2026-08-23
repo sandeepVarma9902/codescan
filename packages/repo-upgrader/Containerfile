@@ -8,6 +8,7 @@ COPY --chown=node:node package.json LICENSE README.md ./
 COPY --chown=node:node bin ./bin
 COPY --chown=node:node src ./src
 COPY --chown=node:node scripts ./scripts
+COPY --chown=node:node dashboard ./dashboard
 
 RUN mkdir -p /data /work && chown node:node /data /work
 USER node
