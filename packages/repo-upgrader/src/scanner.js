@@ -20,10 +20,16 @@ export async function scanRepository(root) {
   const entrypoints = [];
   for (const candidate of entryCandidates) if (await exists(path.join(absoluteRoot, candidate))) entrypoints.push(candidate);
   const envUsages = [];
+  const riskFindings = [];
   for (const file of sourceFiles) {
     const content = await fs.readFile(file, 'utf8');
     if (content.includes('process.env.REACT_APP_')) envUsages.push(relative(absoluteRoot, file));
+    if (/process\.env\s*\[/.test(content)) riskFindings.push(finding('dynamic-env-access', 'warning', relative(absoluteRoot, file), 'Dynamic process.env access cannot be safely renamed.'));
   }
+  if (dependencies['react-app-rewired'] || dependencies['@craco/craco']) riskFindings.push(finding('custom-webpack-overrides', 'blocker', 'package.json', 'CRACO/react-app-rewired configuration requires a dedicated compatibility recipe.'));
+  if (await exists(path.join(absoluteRoot, 'src', 'setupProxy.js'))) riskFindings.push(finding('development-proxy', 'warning', 'src/setupProxy.js', 'CRA proxy middleware must be translated to Vite server.proxy.'));
+  if (await exists(path.join(absoluteRoot, 'src', 'serviceWorker.js')) || await exists(path.join(absoluteRoot, 'src', 'service-worker.js'))) riskFindings.push(finding('service-worker', 'warning', 'src/', 'Service-worker behavior requires manual verification after migration.'));
+  const risk = summarizeRisk(riskFindings);
   return {
     schemaVersion: 1,
     scannedAt: new Date().toISOString(),
@@ -36,9 +42,17 @@ export async function scanRepository(root) {
     scripts: pkg.scripts || {},
     entrypoints,
     envUsages,
+    risk,
     inventory: { files: files.length, sourceFiles: sourceFiles.length },
-    capabilities: { craToVite: craSignals.length >= 2, reactToNext: 'planned' }
+    capabilities: { craToVite: craSignals.length >= 2 && risk.blockers === 0, reactToNext: 'planned' }
   };
+}
+
+function finding(code, severity, file, message) { return { code, severity, file, message }; }
+function summarizeRisk(findings) {
+  const blockers = findings.filter((item) => item.severity === 'blocker').length;
+  const warnings = findings.filter((item) => item.severity === 'warning').length;
+  return { level: blockers ? 'high' : warnings ? 'medium' : 'low', blockers, warnings, findings };
 }
 
 function detectPackageManager(files, root) {
