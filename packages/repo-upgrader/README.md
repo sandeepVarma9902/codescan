@@ -83,7 +83,17 @@ repo-upgrader plan \
 
 The analyzer inventories DOM elements and suggests primitives such as `div → View`, `p → Text`, `button → Pressable`, `input → TextInput`, and `img → Image`. It maps web paths to Expo Router files, identifies components for conversion, flags CSS and desktop interactions, and blocks browser APIs, unsupported DOM elements, and web-only dependencies.
 
-Mutation is intentionally disabled in v0.9, including when `--force` is supplied. The final conversion milestone will create an Expo Router workspace, move reusable business logic first, transform safe components, introduce explicit platform adapters, and require iOS, Android, and web verification before delivery.
+Version 1.0 enables conversion only when the analyzer finds safe structural and text components with no blockers or conversion warnings. It creates an Expo SDK 57 and Expo Router workspace, targets React Native 0.86 and React 19.2.3, converts supported JSX primitives into a parallel `native-src` tree, preserves reusable logic and relative imports, creates native routes, and verifies bundle export for Android, iOS, and web.
+
+```bash
+repo-upgrader migrate \
+  --repo /path/to/safe-react-app \
+  --target react-native \
+  --executor docker \
+  --rollback-on-failure
+```
+
+Interactive elements, forms, media, browser APIs, CSS-dependent components, React Router, unmapped DOM elements, and web-only UI libraries remain hard-gated for later behavior-aware recipes. `--force` does not bypass React Native conversion eligibility.
 
 Run the migration and automatically restore the original files if verification fails:
 
