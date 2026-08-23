@@ -85,3 +85,11 @@ test('React Native plan exposes Expo conversion mappings while mutation stays ga
   assert.ok(plan.primitiveMappings.some((item) => item.from === 'div' && item.to === 'View'));
   assert.ok(plan.gates.includes('iOS and Android behavioral tests available'));
 });
+
+test('React Native plan enables conversion only for safe structural components', async () => {
+  const root = await fixture();
+  await fs.writeFile(path.join(root, 'src/App.jsx'), `export default function App(){ return <main><h1>Hello</h1><p>Details</p></main> }`);
+  const plan = createPlan(await scanRepository(root), 'react-native');
+  assert.equal(plan.supported, true);
+  assert.equal(plan.strategy, 'expo-router-incremental-conversion');
+});
