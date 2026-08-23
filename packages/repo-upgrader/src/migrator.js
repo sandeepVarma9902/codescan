@@ -4,6 +4,7 @@ import { createPlan } from './planner.js';
 import { scanRepository } from './scanner.js';
 import { transformCraToVite } from './transform.js';
 import { verify } from './verifier.js';
+import { applyDeterministicRepairs } from './repair.js';
 import { STATE_DIR, writeJson } from './utils.js';
 
 export async function migrate(root, options = {}) {
@@ -12,10 +13,18 @@ export async function migrate(root, options = {}) {
   const plan = createPlan(scan, options.target || 'vite');
   if (!plan.supported && !options.force) throw new Error(`${plan.reason || plan.preconditions.join('; ')} Use --force only after reviewing the reported risks.`);
   const checkpointId = await createCheckpoint(resolved);
-  const report = { schemaVersion: 1, startedAt: new Date().toISOString(), migration: plan.migration, status: 'running', checkpointId, forced: Boolean(options.force), scan, plan, changes: [], verification: null };
+  const report = { schemaVersion: 1, startedAt: new Date().toISOString(), migration: plan.migration, status: 'running', checkpointId, forced: Boolean(options.force), executionPolicy: { executor: options.executor || 'local', timeoutMs: options.timeoutMs || 600000, maxRepairAttempts: options.maxRepairAttempts || 0 }, scan, plan, changes: [], repairs: [], verificationRuns: [], verification: null };
   try {
     report.changes = await transformCraToVite(resolved);
-    report.verification = await verify(resolved, scan.project.packageManager, options);
+    const maxRepairs = Math.max(0, Math.min(Number(options.maxRepairAttempts) || 0, 3));
+    for (let attempt = 0; attempt <= maxRepairs; attempt += 1) {
+      report.verification = await verify(resolved, scan.project.packageManager, options);
+      report.verificationRuns.push({ attempt, ...report.verification });
+      if (report.verification.passed || attempt === maxRepairs) break;
+      const repairs = await applyDeterministicRepairs(resolved, report.verification);
+      report.repairs.push(...repairs.map((repair) => ({ attempt: attempt + 1, ...repair })));
+      if (repairs.length === 0) break;
+    }
     report.status = report.verification.passed ? 'succeeded' : 'verification-failed';
     if (!report.verification.passed && options.rollbackOnFailure) {
       await rollback(resolved, checkpointId);

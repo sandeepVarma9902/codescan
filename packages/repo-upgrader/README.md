@@ -15,6 +15,9 @@ The first production path is **Create React App → Vite**. A deliberately gated
 - Runs dependency installation, build, test, and lint when those scripts exist.
 - Can automatically roll back failed migrations or restore any checkpoint later.
 - Emits versioned JSON scans, plans, and migration reports for CI, dashboards, or a future hosted control plane.
+- Runs verification with sanitized environment variables, per-command timeouts, bounded output, fail-fast checks, and secret redaction.
+- Optionally verifies inside a resource-limited Docker container with no network access after dependency installation.
+- Supports up to three deterministic repair attempts and records every recipe and verification run in the report.
 
 ## Requirements
 
@@ -54,6 +57,19 @@ repo-upgrader migrate \
 
 High-risk repositories are stopped before mutation. After reviewing the JSON findings, an operator can deliberately override the gate with `--force`.
 
+For untrusted customer repositories, run verification in Docker and allow a bounded repair pass:
+
+```bash
+repo-upgrader migrate \
+  --repo /path/to/customer-app \
+  --executor docker \
+  --timeout-ms 600000 \
+  --max-repair-attempts 2 \
+  --rollback-on-failure
+```
+
+Docker verification uses a disposable Node 20 container, a 2 GB memory limit, two CPUs, a PID limit, and no network for build/test/lint. Dependency installation receives network access and no host secrets are forwarded. Docker must be installed and running.
+
 For an offline transform, skip installation. Build/test/lint still run against already installed dependencies:
 
 ```bash
@@ -86,7 +102,7 @@ Each target migration is intended to become a migration pack with four contracts
 
 - The Vite pack covers conventional CRA layouts and entrypoints. Custom webpack overrides are blocked; service workers and proxy middleware are surfaced as warnings for explicit review.
 - Environment variable references are converted in JavaScript and TypeScript source, but `.env` key renaming is left explicit to avoid changing deployment contracts silently.
-- Verification records command output but does not yet use an LLM repair loop. The next step is bounded remediation: classify a failure, select an approved recipe, re-run only affected checks, and stop after a configured attempt budget.
+- Repair is intentionally deterministic and allowlisted. It does not yet perform model-generated code edits; unsupported failures stop and remain visible in the report.
 - Checkpoints intentionally exclude generated directories, Git metadata, dependencies, and `.modernizer` itself.
 
 ## Development
@@ -104,7 +120,7 @@ The test suite uses temporary CRA fixtures and does not require network access.
 1. Expand CRA recipes: proxies, service workers, SVG imports, Jest-to-Vitest, path aliases, and `.env` contract assistance.
 2. Add Git-aware checkpoints and PR evidence (commits per migration phase, diff summaries, risk scoring).
 3. Implement the React → Next.js analyzer and a gated App Router migration pack.
-4. Add a container sandbox and policy engine for untrusted repositories.
+4. Expand the sandbox policy with read-only source mounts, disposable workspaces, and organization-specific egress rules.
 5. Add a hosted API/worker model, GitHub App, billing, organization policies, and migration analytics.
 
 ## Security note
