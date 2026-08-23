@@ -1,14 +1,19 @@
-import { spawnSync } from 'node:child_process';
 import { readJson } from './utils.js';
 import path from 'node:path';
+import { execute } from './executor.js';
 
 export async function verify(root, packageManager, options = {}) {
   const pkg = await readJson(path.join(root, 'package.json'));
   const checks = [];
-  if (!options.skipInstall) checks.push(run(root, installCommand(packageManager), 'install'));
-  checks.push(run(root, scriptCommand(packageManager, 'build'), 'build'));
-  if (pkg.scripts?.test) checks.push(run(root, scriptCommand(packageManager, 'test', true), 'test'));
-  if (pkg.scripts?.lint) checks.push(run(root, scriptCommand(packageManager, 'lint'), 'lint'));
+  if (!options.skipInstall) {
+    checks.push(run(root, installCommand(packageManager), 'install', { ...options, allowNetwork: true }));
+    if (checks.at(-1).status !== 'passed') return { passed: false, checks };
+  }
+  checks.push(run(root, scriptCommand(packageManager, 'build'), 'build', options));
+  if (checks.at(-1).status !== 'passed') return { passed: false, checks };
+  if (pkg.scripts?.test) checks.push(run(root, scriptCommand(packageManager, 'test', true), 'test', options));
+  if (checks.at(-1)?.status !== 'passed') return { passed: false, checks };
+  if (pkg.scripts?.lint) checks.push(run(root, scriptCommand(packageManager, 'lint'), 'lint', options));
   return { passed: checks.every((check) => check.status === 'passed'), checks };
 }
 
@@ -26,8 +31,6 @@ function scriptCommand(pm, name, ci = false) {
   return ['npm', ['run', name, ...(ci ? ['--', '--watchAll=false'] : [])]];
 }
 
-function run(root, [command, args], name) {
-  const started = Date.now();
-  const result = spawnSync(command, args, { cwd: root, encoding: 'utf8', env: { ...process.env, CI: 'true' } });
-  return { name, command: [command, ...args].join(' '), status: result.status === 0 ? 'passed' : 'failed', exitCode: result.status, durationMs: Date.now() - started, output: `${result.stdout || ''}${result.stderr || ''}`.slice(-4000) };
+function run(root, command, name, options) {
+  return { name, ...execute(root, command, options) };
 }
