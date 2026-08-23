@@ -2,10 +2,11 @@ import path from 'node:path';
 import { migrate } from '../migrator.js';
 
 export class JobWorker {
-  constructor({ store, allowedRepositoryRoot, concurrency = 1 }) {
+  constructor({ store, allowedRepositoryRoot, concurrency = 1, githubDelivery = null }) {
     this.store = store;
     this.allowedRoot = allowedRepositoryRoot ? path.resolve(allowedRepositoryRoot) : null;
     this.concurrency = Math.max(1, Math.min(Number(concurrency) || 1, 4));
+    this.githubDelivery = githubDelivery;
     this.queue = [];
     this.active = 0;
   }
@@ -24,7 +25,13 @@ export class JobWorker {
     const job = this.store.get(id);
     try {
       if (!job.repositoryPath) {
-        await this.store.update(id, { status: 'awaiting-github-app', message: 'GitHub App installation-token exchange is required before cloning this repository.' });
+        if (!this.githubDelivery) {
+          await this.store.update(id, { status: 'awaiting-github-app', message: 'Configure GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY to enable delivery.' });
+          return;
+        }
+        await this.store.update(id, { status: 'running' });
+        const delivery = await this.githubDelivery.deliver(job);
+        await this.store.update(id, { status: 'succeeded', delivery });
         return;
       }
       const repositoryPath = path.resolve(job.repositoryPath);
