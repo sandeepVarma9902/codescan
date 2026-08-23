@@ -278,6 +278,10 @@ Version 1.8 includes a responsive, dependency-free control panel at `/dashboard`
 
 Version 1.9 adds live five-second refresh while migrations are active, a lifecycle timeline, safe cancellation for queued work, direct links to generated pull requests, failure details, and downloadable JSON verification reports. Reports are also available from `GET /v1/jobs/:id/report`; the endpoint returns `409` until evidence exists and preserves the same tenant ownership rules as job lookup.
 
+### CRA compatibility recipes
+
+Version 2.0 deepens the deterministic CRA → Vite pack. The scanner inventories TypeScript/JavaScript `paths`, CRA `ReactComponent` SVG imports, and conventional `setupProxy.js` routes. The transformer preserves aliases through `vite-tsconfig-paths`, converts SVG imports to `vite-plugin-svgr`'s `?react` contract, and translates recognized proxy routes into Vite `server.proxy` entries while retaining the source proxy file as migration evidence. Unrecognized proxy middleware and service-worker behavior remain visible for manual review rather than being silently discarded.
+
 Submit and inspect a job:
 
 ```bash
