@@ -238,6 +238,12 @@ curl -X POST http://127.0.0.1:8787/v1/api-keys \
 
 The complete `ru_live_...` secret is returned only by the creation response. Only its SHA-256 digest and a short display prefix are persisted. Generated keys contain 192 bits of randomness, revocation takes effect immediately, and list responses never expose credential digests. Environment-configured keys remain available as bootstrap or break-glass credentials.
 
+### Audit trail
+
+Version 1.5 records security and business events in an append-only JSON Lines audit trail. Credential creation and revocation, migration submissions and cancellations, and billing plan changes are recorded with actor, tenant, resource, timestamp, and safe metadata. Each record includes the previous record's hash, forming a SHA-256 chain that is verified at startup; modified or reordered history prevents the service from starting silently with compromised evidence.
+
+Use `GET /v1/audit-events?limit=100&action=migration.submitted` to retrieve recent activity. Member credentials receive only their account's events, while administrators can review the aggregate trail. Fields with names such as key, token, secret, or authorization are removed before persistence.
+
 Submit and inspect a job:
 
 ```bash
