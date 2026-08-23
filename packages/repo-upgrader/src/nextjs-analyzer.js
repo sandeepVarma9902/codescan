@@ -24,6 +24,8 @@ export function analyzeNextReadiness(sourceRecords, dependencies = {}) {
   }
 
   if (dependencies['react-router-dom'] && routes.length === 0) findings.push(finding('dynamic-routes', 'warning', 'src/', 'React Router is installed but static route declarations were not found; routes may be data-driven.'));
+  if (dependencies.react && !/[~^]?19\./.test(dependencies.react)) findings.push(finding('react-major-upgrade', 'warning', 'package.json', 'Next.js 16 requires upgrading the application to React 19.2 and Node.js 20.9 or newer.'));
+  if (!sourceRecords.some(({ file }) => /^src\/App\.[jt]sx?$/.test(file))) findings.push(finding('missing-app-component', 'blocker', 'src/', 'The compatibility bridge requires a conventional src/App component.'));
   const uniqueRoutes = dedupe(routes, (route) => `${route.path}:${route.sourceFile}`);
   const blockers = findings.filter((item) => item.severity === 'blocker').length;
   const warnings = findings.filter((item) => item.severity === 'warning').length;
