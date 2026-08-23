@@ -175,6 +175,28 @@ export MODERNIZER_ALLOWED_REPO_ROOT='/srv/modernizer/repositories'
 repo-upgrader serve --host 127.0.0.1 --port 8787
 ```
 
+For multi-tenant deployments, configure account-scoped API keys instead of the legacy administrator token:
+
+```bash
+export MODERNIZER_API_KEYS_JSON='[
+  {"key":"rk_customer_a_long_random_value","accountId":"customer-a","plan":"starter"},
+  {"key":"rk_customer_b_long_random_value","accountId":"customer-b","plan":"pro"}
+]'
+```
+
+Keys are SHA-256 digested in memory after startup and are never persisted with jobs. Every job records its account and plan. Non-admin accounts can list, inspect, cancel, and meter only their own jobs; cross-account lookup returns `404` to avoid leaking identifiers.
+
+Built-in entitlements provide a vendor-neutral billing boundary:
+
+| Plan | Monthly migrations | Targets |
+|---|---:|---|
+| Free | 3 | CRA → Vite |
+| Starter | 25 | CRA → Vite, React → Next.js |
+| Pro | 100 | All targets including React Native |
+| Enterprise | Unlimited | All targets |
+
+Quota enforcement occurs after idempotency lookup, so a retried request returns its original job without consuming another unit. A future Stripe/Paddle adapter can update account-plan assignments without changing migration execution or tenant isolation.
+
 Submit and inspect a job:
 
 ```bash

@@ -72,3 +72,28 @@ test('job API requires auth and accepts valid jobs', async (t) => {
   const usage = await fetch(`${base}/v1/usage`, { headers: { authorization: 'Bearer test-token' } });
   assert.ok((await usage.json()).totalJobs >= 2);
 });
+
+test('tenant API keys isolate jobs and enforce plan targets', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'repo-upgrader-tenants-'));
+  const store = await new JobStore(path.join(root, 'jobs.json')).load();
+  const service = await startService({ apiKeys: [
+    { key: 'rk_free_tenant_a_123456', accountId: 'tenant-a', plan: 'free' },
+    { key: 'rk_pro_tenant_b_1234567', accountId: 'tenant-b', plan: 'pro' }
+  ], port: 0, store, worker: { enqueue() {} } });
+  t.after(() => service.server.close());
+  const base = `http://127.0.0.1:${service.address.port}`;
+  const submit = (token, target = 'vite') => fetch(`${base}/v1/jobs`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ repository: { fullName: 'owner/repo' }, target }) });
+  const tenantAJob = await (await submit('rk_free_tenant_a_123456')).json();
+  const denied = await submit('rk_free_tenant_a_123456', 'nextjs');
+  assert.equal(denied.status, 403);
+  const tenantBJob = await (await submit('rk_pro_tenant_b_1234567', 'react-native')).json();
+  const hidden = await fetch(`${base}/v1/jobs/${tenantBJob.id}`, { headers: { authorization: 'Bearer rk_free_tenant_a_123456' } });
+  assert.equal(hidden.status, 404);
+  const list = await fetch(`${base}/v1/jobs`, { headers: { authorization: 'Bearer rk_free_tenant_a_123456' } });
+  const jobs = (await list.json()).jobs;
+  assert.deepEqual(jobs.map((job) => job.id), [tenantAJob.id]);
+  const usage = await fetch(`${base}/v1/usage`, { headers: { authorization: 'Bearer rk_free_tenant_a_123456' } });
+  const usageBody = await usage.json();
+  assert.equal(usageBody.plan, 'free');
+  assert.equal(usageBody.periodJobs, 1);
+});
