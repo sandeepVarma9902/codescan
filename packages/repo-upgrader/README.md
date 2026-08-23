@@ -19,6 +19,7 @@ The first production path is **Create React App → Vite**. The **React → Next
 - Optionally verifies inside a resource-limited Docker container with no network access after dependency installation.
 - Supports up to three deterministic repair attempts and records every recipe and verification run in the report.
 - Inventories React Router paths, proposes App Router destinations, detects client-only boundaries and SSR hazards, classifies data fetching, and scores React → Next.js readiness.
+- Analyzes React → React Native conversion, maps DOM elements to native primitives, proposes Expo Router destinations, and blocks unsafe browser/platform assumptions.
 
 ## Requirements
 
@@ -68,6 +69,21 @@ repo-upgrader migrate \
 ```
 
 The bridge upgrades to Next.js 16, React 19.2, and Node.js 20.9+, creates the root App Router layout, and hosts the existing SPA under a client-rendered optional catch-all route. This preserves behavior as an intermediate migration state. Medium, low, and blocked projects remain gated unless an operator reviews the findings and deliberately passes `--force`.
+
+## React to React Native roadmap
+
+React → React Native is an explicit product target using Expo and Expo Router, which aligns with current React Native guidance to use a framework for new applications. Generate the conversion analysis with:
+
+```bash
+repo-upgrader plan \
+  --repo /path/to/react-web-app \
+  --target react-native \
+  --out react-native-readiness.json
+```
+
+The analyzer inventories DOM elements and suggests primitives such as `div → View`, `p → Text`, `button → Pressable`, `input → TextInput`, and `img → Image`. It maps web paths to Expo Router files, identifies components for conversion, flags CSS and desktop interactions, and blocks browser APIs, unsupported DOM elements, and web-only dependencies.
+
+Mutation is intentionally disabled in v0.9, including when `--force` is supplied. The final conversion milestone will create an Expo Router workspace, move reusable business logic first, transform safe components, introduce explicit platform adapters, and require iOS, Android, and web verification before delivery.
 
 Run the migration and automatically restore the original files if verification fails:
 

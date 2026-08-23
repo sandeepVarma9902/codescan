@@ -62,7 +62,7 @@ async function githubWebhook(request, response, context) {
 function validateJob(input) {
   if (!input || typeof input !== 'object') throw new Error('A JSON job payload is required.');
   if (!input.repositoryPath && !input.repository?.fullName) throw new Error('repositoryPath or repository.fullName is required.');
-  if (input.target && !['vite', 'nextjs'].includes(input.target)) throw new Error('target must be vite or nextjs.');
+  if (input.target && !['vite', 'nextjs', 'react-native'].includes(input.target)) throw new Error('target must be vite, nextjs, or react-native.');
   return { repositoryPath: input.repositoryPath, repository: input.repository, target: input.target || 'vite', executor: input.executor || 'docker', maxRepairAttempts: Math.min(Number(input.maxRepairAttempts) || 1, 3) };
 }
 
