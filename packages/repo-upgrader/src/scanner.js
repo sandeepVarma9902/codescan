@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { exists, readJson, relative, walk } from './utils.js';
 import { analyzeNextReadiness } from './nextjs-analyzer.js';
+import { analyzeReactNativeReadiness } from './react-native-analyzer.js';
 
 const SOURCE_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx', '.css', '.scss', '.html']);
 
@@ -34,6 +35,7 @@ export async function scanRepository(root) {
   if (await exists(path.join(absoluteRoot, 'src', 'serviceWorker.js')) || await exists(path.join(absoluteRoot, 'src', 'service-worker.js'))) riskFindings.push(finding('service-worker', 'warning', 'src/', 'Service-worker behavior requires manual verification after migration.'));
   const risk = summarizeRisk(riskFindings);
   const nextjs = analyzeNextReadiness(sourceRecords, dependencies);
+  const reactNative = analyzeReactNativeReadiness(sourceRecords, dependencies);
   return {
     schemaVersion: 1,
     scannedAt: new Date().toISOString(),
@@ -48,8 +50,9 @@ export async function scanRepository(root) {
     envUsages,
     risk,
     nextjs,
+    reactNative,
     inventory: { files: files.length, sourceFiles: sourceFiles.length },
-    capabilities: { craToVite: craSignals.length >= 2 && risk.blockers === 0, reactToNext: 'analysis-ready' }
+    capabilities: { craToVite: craSignals.length >= 2 && risk.blockers === 0, reactToNext: 'compatibility-bridge', reactToReactNative: 'analysis-ready' }
   };
 }
 
