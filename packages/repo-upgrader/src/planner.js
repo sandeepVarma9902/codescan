@@ -1,4 +1,23 @@
 export function createPlan(scan, target = 'vite') {
+  if (target === 'react-native') {
+    const analysis = scan.reactNative;
+    return {
+      schemaVersion: 1,
+      migration: 'react-to-react-native',
+      status: 'analysis-ready',
+      supported: false,
+      strategy: 'expo-router-incremental-conversion',
+      reason: 'Automated mutation remains gated until native navigation, styling, platform API, interaction, and device-test decisions are approved.',
+      readiness: analysis?.readiness,
+      framework: analysis?.recommendedFramework || 'expo-router',
+      componentMappings: analysis?.components || [],
+      primitiveMappings: analysis?.primitiveMappings || [],
+      routeMappings: analysis?.routeCandidates || [],
+      findings: analysis?.findings || [],
+      gates: analysis?.gates || [],
+      phases: ['create Expo Router workspace', 'convert shared logic and data modules', 'convert design tokens and styling', 'replace DOM primitives component-by-component', 'replace browser APIs with platform adapters', 'convert navigation', 'verify on iOS, Android, and web']
+    };
+  }
   if (target === 'nextjs') {
     const analysis = scan.nextjs;
     const bridgeSupported = analysis?.readiness?.level === 'high' && analysis.readiness.blockers === 0;
