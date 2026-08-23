@@ -55,6 +55,32 @@ export class JobStore {
     return { accountId: accountId || null, period, periodJobs, totalJobs: jobs.length, byStatus, successfulMigrations: byStatus.succeeded || 0, failedMigrations: byStatus.failed || 0 };
   }
 
+  analytics(accountId) {
+    const jobs = [...this.jobs.values()].filter((job) => !accountId || job.accountId === accountId);
+    const byTarget = {};
+    const durations = [];
+    for (const job of jobs) {
+      const target = job.target || 'vite';
+      byTarget[target] ||= { total: 0, succeeded: 0, failed: 0 };
+      byTarget[target].total += 1;
+      if (job.status === 'succeeded') byTarget[target].succeeded += 1;
+      if (job.status === 'failed') byTarget[target].failed += 1;
+      const started = job.events?.find((event) => event.status === 'running');
+      const finished = [...(job.events || [])].reverse().find((event) => ['succeeded', 'failed'].includes(event.status));
+      if (started && finished) durations.push(new Date(finished.at) - new Date(started.at));
+    }
+    const completed = jobs.filter((job) => ['succeeded', 'failed'].includes(job.status));
+    const succeeded = completed.filter((job) => job.status === 'succeeded').length;
+    return {
+      accountId: accountId || null,
+      totalMigrations: jobs.length,
+      completedMigrations: completed.length,
+      successRate: completed.length ? Number((succeeded / completed.length).toFixed(4)) : null,
+      averageDurationMs: durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : null,
+      byTarget
+    };
+  }
+
   async cancel(id) {
     const job = this.jobs.get(id);
     if (!job) return null;
