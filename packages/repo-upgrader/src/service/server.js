@@ -12,6 +12,7 @@ export async function startService(options = {}) {
   const store = options.store || await new JobStore(options.storeFile || path.resolve('.modernizer-service/jobs.json')).load();
   const githubDelivery = options.githubDelivery || createGitHubDelivery(options);
   const worker = options.worker || new JobWorker({ store, githubDelivery, allowedRepositoryRoot: options.allowedRepositoryRoot ?? process.env.MODERNIZER_ALLOWED_REPO_ROOT, concurrency: options.concurrency ?? process.env.MODERNIZER_CONCURRENCY });
+  if (!options.worker) worker.resumeQueued();
   const server = http.createServer((request, response) => route(request, response, { token, store, worker, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET }));
   const port = options.port ?? (Number(process.env.MODERNIZER_PORT) || 8787);
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, options.host || '127.0.0.1', resolve); });
@@ -25,10 +26,20 @@ async function route(request, response, context) {
     if (!authorized(request, context.token)) return json(response, 401, { error: 'unauthorized' });
     if (request.method === 'POST' && request.url === '/v1/jobs') {
       const input = validateJob(await body(request));
-      const job = await context.store.create({ source: 'api', ...input });
-      context.worker.enqueue(job);
-      return json(response, 202, job);
+      const idempotencyKey = request.headers['idempotency-key'];
+      if (idempotencyKey && !/^[A-Za-z0-9_.:-]{8,128}$/.test(idempotencyKey)) throw new Error('Invalid Idempotency-Key.');
+      const result = await context.store.createOrGet({ source: 'api', ...input }, idempotencyKey);
+      if (result.created) context.worker.enqueue(result.job);
+      return json(response, result.created ? 202 : 200, { ...result.job, deduplicated: !result.created });
     }
+    if (request.method === 'GET' && request.url?.startsWith('/v1/jobs?')) {
+      const url = new URL(request.url, 'http://service');
+      return json(response, 200, { jobs: context.store.list({ status: url.searchParams.get('status') || undefined, limit: url.searchParams.get('limit') }) });
+    }
+    if (request.method === 'GET' && request.url === '/v1/jobs') return json(response, 200, { jobs: context.store.list() });
+    if (request.method === 'GET' && request.url === '/v1/usage') return json(response, 200, context.store.usage());
+    const cancel = request.method === 'DELETE' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)$/i);
+    if (cancel) { const job = await context.store.cancel(cancel[1]); return job ? json(response, 200, job) : json(response, 404, { error: 'not_found' }); }
     const match = request.method === 'GET' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)$/i);
     if (match) { const job = context.store.get(match[1]); return job ? json(response, 200, job) : json(response, 404, { error: 'not_found' }); }
     return json(response, 404, { error: 'not_found' });
@@ -40,6 +51,9 @@ async function githubWebhook(request, response, context) {
   if (!verifyGitHubSignature(raw, request.headers['x-hub-signature-256'], context.webhookSecret)) return json(response, 401, { error: 'invalid_signature' });
   const input = jobFromGitHubDispatch(request.headers['x-github-event'], JSON.parse(raw));
   if (!input) return json(response, 202, { accepted: false });
+  input.deliveryId = request.headers['x-github-delivery'];
+  const duplicate = input.deliveryId && context.store.findByDeliveryId(input.deliveryId);
+  if (duplicate) return json(response, 200, { ...duplicate, deduplicated: true });
   const job = await context.store.create(input);
   context.worker.enqueue(job);
   return json(response, 202, job);
