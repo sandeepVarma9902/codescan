@@ -2,7 +2,7 @@
 
 Repo Upgrader is an MVP modernization agent for repeatable, auditable React migrations. It scans a repository, explains the proposed work, creates a checkpoint, applies deterministic transforms, runs the project's own quality gates, and writes a machine-readable report.
 
-The first production path is **Create React App → Vite**. The **React → Next.js** path now performs deep readiness analysis and App Router mapping while keeping code mutation gated until routing, rendering, data-fetching, and behavioral-test decisions are approved.
+The first production path is **Create React App → Vite**. The **React → Next.js** path performs deep readiness analysis and can create a conservative App Router compatibility bridge for high-readiness projects, while route-by-route server migration stays gated.
 
 ## What the MVP does
 
@@ -56,7 +56,18 @@ repo-upgrader plan \
   --out nextjs-readiness.json
 ```
 
-The plan maps paths such as `/users/:id` to `app/users/[id]/page`, identifies files requiring `'use client'`, flags browser APIs and global CSS placement, classifies effect-based data fetching, and lists approval gates. `migrate --target nextjs` remains disabled until deterministic transforms can preserve verified behavior.
+The plan maps paths such as `/users/:id` to `app/users/[id]/page`, identifies files requiring `'use client'`, flags browser APIs and global CSS placement, classifies effect-based data fetching, and lists approval gates.
+
+For a high-readiness project, create the compatibility bridge:
+
+```bash
+repo-upgrader migrate \
+  --repo /path/to/react-app \
+  --target nextjs \
+  --rollback-on-failure
+```
+
+The bridge upgrades to Next.js 16, React 19.2, and Node.js 20.9+, creates the root App Router layout, and hosts the existing SPA under a client-rendered optional catch-all route. This preserves behavior as an intermediate migration state. Medium, low, and blocked projects remain gated unless an operator reviews the findings and deliberately passes `--force`.
 
 Run the migration and automatically restore the original files if verification fails:
 
@@ -108,7 +119,7 @@ CLI
  └─ Reporter      versioned JSON evidence for every run
 ```
 
-Each target migration is intended to become a migration pack with four contracts: detection, planning, transformation, and verification. CRA → Vite implements that contract today. React → Next.js implements detection and planning today; transformation remains gated behind explicit route, rendering, data-fetching, and behavioral-test approvals.
+Each target migration is intended to become a migration pack with four contracts: detection, planning, transformation, and verification. CRA → Vite implements that contract. React → Next.js now implements analysis plus a verified compatibility-bridge transform; deeper server/client decomposition remains gated behind explicit route, rendering, data-fetching, and behavioral-test approvals.
 
 ## Current limits
 
