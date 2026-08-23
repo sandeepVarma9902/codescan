@@ -15,8 +15,26 @@ test('job store persists state transitions', async () => {
   const job = await store.create({ target: 'vite', repository: { fullName: 'owner/repo' } });
   await store.update(job.id, { status: 'running' });
   const reloaded = await new JobStore(file).load();
-  assert.equal(reloaded.get(job.id).status, 'running');
-  assert.equal(reloaded.get(job.id).events.length, 2);
+  assert.equal(reloaded.get(job.id).status, 'interrupted');
+  assert.equal(reloaded.get(job.id).events.length, 3);
+});
+
+test('job store deduplicates, meters, cancels, and recovers interrupted work', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'repo-upgrader-control-'));
+  const file = path.join(root, 'jobs.json');
+  const store = await new JobStore(file).load();
+  const first = await store.createOrGet({ target: 'vite', repository: { fullName: 'owner/repo' } }, 'customer-job-001');
+  const repeated = await store.createOrGet({ target: 'vite', repository: { fullName: 'owner/repo' } }, 'customer-job-001');
+  assert.equal(first.created, true);
+  assert.equal(repeated.created, false);
+  assert.equal(repeated.job.id, first.job.id);
+  assert.equal(store.usage().totalJobs, 1);
+  await store.update(first.job.id, { status: 'running' });
+  const recovered = await new JobStore(file).load();
+  assert.equal(recovered.get(first.job.id).status, 'interrupted');
+  const queued = await recovered.create({ target: 'vite', repository: { fullName: 'owner/other' } });
+  assert.equal((await recovered.cancel(queued.id)).status, 'cancelled');
+  await assert.rejects(recovered.cancel(first.job.id), /cannot be cancelled/);
 });
 
 test('GitHub webhook signatures are timing-safe and exact', () => {
@@ -42,4 +60,15 @@ test('job API requires auth and accepts valid jobs', async (t) => {
   assert.deepEqual(accepted, [job.id]);
   const lookup = await fetch(`${base}/v1/jobs/${job.id}`, { headers: { authorization: 'Bearer test-token' } });
   assert.equal((await lookup.json()).id, job.id);
+  const repeated = await fetch(`${base}/v1/jobs`, { method: 'POST', headers: { authorization: 'Bearer test-token', 'content-type': 'application/json', 'idempotency-key': 'customer-job-002' }, body: JSON.stringify({ repository: { fullName: 'owner/repo' }, target: 'vite' }) });
+  const repeatedJob = await repeated.json();
+  const duplicate = await fetch(`${base}/v1/jobs`, { method: 'POST', headers: { authorization: 'Bearer test-token', 'content-type': 'application/json', 'idempotency-key': 'customer-job-002' }, body: JSON.stringify({ repository: { fullName: 'owner/repo' }, target: 'vite' }) });
+  const duplicateJob = await duplicate.json();
+  assert.equal(duplicate.status, 200);
+  assert.equal(duplicateJob.id, repeatedJob.id);
+  assert.equal(duplicateJob.deduplicated, true);
+  const listed = await fetch(`${base}/v1/jobs?limit=10`, { headers: { authorization: 'Bearer test-token' } });
+  assert.ok((await listed.json()).jobs.length >= 2);
+  const usage = await fetch(`${base}/v1/usage`, { headers: { authorization: 'Bearer test-token' } });
+  assert.ok((await usage.json()).totalJobs >= 2);
 });

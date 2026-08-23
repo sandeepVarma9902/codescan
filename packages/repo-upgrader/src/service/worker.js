@@ -13,6 +13,8 @@ export class JobWorker {
 
   enqueue(job) { this.queue.push(job.id); queueMicrotask(() => this.drain()); }
 
+  resumeQueued() { for (const job of this.store.list({ status: 'queued', limit: 100 })) this.enqueue(job); }
+
   async drain() {
     while (this.active < this.concurrency && this.queue.length) {
       const id = this.queue.shift();
@@ -23,6 +25,7 @@ export class JobWorker {
 
   async run(id) {
     const job = this.store.get(id);
+    if (!job || job.status !== 'queued') return;
     try {
       if (!job.repositoryPath) {
         if (!this.githubDelivery) {
