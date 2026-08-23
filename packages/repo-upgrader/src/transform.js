@@ -10,6 +10,11 @@ export async function transformCraToVite(root) {
   if (pkg.scripts.eject) delete pkg.scripts.eject;
   for (const section of ['dependencies', 'devDependencies']) if (pkg[section]?.['react-scripts']) delete pkg[section]['react-scripts'];
   pkg.devDependencies = { ...(pkg.devDependencies || {}), vite: pkg.devDependencies?.vite || '^5.4.0', '@vitejs/plugin-react': pkg.devDependencies?.['@vitejs/plugin-react'] || '^4.3.0' };
+  const pathAliases = await hasConfiguredPaths(root);
+  const svgFiles = await findSvgComponentImports(root);
+  const proxyRoutes = await readProxyRoutes(root);
+  if (pathAliases) pkg.devDependencies['vite-tsconfig-paths'] ||= '^5.1.0';
+  if (svgFiles.length) pkg.devDependencies['vite-plugin-svgr'] ||= '^4.3.0';
   const migratesTests = pkg.scripts?.test?.includes('react-scripts');
   if (migratesTests) {
     pkg.scripts.test = 'vitest run';
@@ -35,7 +40,8 @@ export async function transformCraToVite(root) {
     const after = before
       .replace(/process\.env\.REACT_APP_([A-Z0-9_]+)/g, 'import.meta.env.VITE_$1')
       .replace(/process\.env\.PUBLIC_URL/g, 'import.meta.env.BASE_URL')
-      .replace(/process\.env\.NODE_ENV/g, 'import.meta.env.MODE');
+      .replace(/process\.env\.NODE_ENV/g, 'import.meta.env.MODE')
+      .replace(/import\s*{\s*ReactComponent\s+as\s+(\w+)\s*}\s*from\s*(['"])([^'"]+\.svg)\2\s*;?/g, 'import $1 from $2$3?react$2;');
     if (after !== before) { await fs.writeFile(file, after); changes.push(path.relative(root, file)); }
   }
   for (const name of ['.env', '.env.local', '.env.development', '.env.production', '.env.test']) {
@@ -47,10 +53,40 @@ export async function transformCraToVite(root) {
   }
   const setupFile = await exists(path.join(root, 'src', 'setupTests.js')) ? "'./src/setupTests.js'" : await exists(path.join(root, 'src', 'setupTests.ts')) ? "'./src/setupTests.ts'" : null;
   const testConfig = migratesTests ? `,\n  test: { environment: 'jsdom', globals: true${setupFile ? `, setupFiles: [${setupFile}]` : ''} }` : '';
-  const config = `import { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\n\nexport default defineConfig({ plugins: [react()]${testConfig} });\n`;
+  const imports = [`import { defineConfig } from 'vite';`, `import react from '@vitejs/plugin-react';`];
+  const plugins = ['react()'];
+  if (pathAliases) { imports.push(`import tsconfigPaths from 'vite-tsconfig-paths';`); plugins.push('tsconfigPaths()'); }
+  if (svgFiles.length) { imports.push(`import svgr from 'vite-plugin-svgr';`); plugins.push('svgr()'); }
+  const proxyConfig = proxyRoutes.length ? `,\n  server: { proxy: { ${proxyRoutes.map(({ route, target }) => `${JSON.stringify(route)}: { target: ${JSON.stringify(target)}, changeOrigin: true }`).join(', ')} } }` : '';
+  const config = `${imports.join('\n')}\n\nexport default defineConfig({ plugins: [${plugins.join(', ')}]${testConfig}${proxyConfig} });\n`;
   await fs.writeFile(path.join(root, 'vite.config.js'), config);
   changes.push('vite.config.js');
   return [...new Set(changes)].sort();
+}
+
+async function hasConfiguredPaths(root) {
+  for (const name of ['tsconfig.json', 'jsconfig.json']) {
+    const file = path.join(root, name);
+    if (!(await exists(file))) continue;
+    try { if (Object.keys((await readJson(file)).compilerOptions?.paths || {}).length) return true; } catch { return false; }
+  }
+  return false;
+}
+
+async function findSvgComponentImports(root) {
+  const matches = [];
+  for (const file of await walk(root)) {
+    if (!/\.[jt]sx?$/.test(file)) continue;
+    if (/import\s*{\s*ReactComponent\s+as\s+\w+\s*}\s*from\s*['"][^'"]+\.svg['"]/.test(await fs.readFile(file, 'utf8'))) matches.push(file);
+  }
+  return matches;
+}
+
+async function readProxyRoutes(root) {
+  const file = path.join(root, 'src', 'setupProxy.js');
+  if (!(await exists(file))) return [];
+  const content = await fs.readFile(file, 'utf8');
+  return [...content.matchAll(/createProxyMiddleware\(\s*['"]([^'"]+)['"]\s*,\s*{[\s\S]*?target\s*:\s*['"]([^'"]+)['"]/g)].map((match) => ({ route: match[1], target: match[2] }));
 }
 
 async function findEntry(root) {
