@@ -2,7 +2,7 @@
 
 Repo Upgrader is an MVP modernization agent for repeatable, auditable React migrations. It scans a repository, explains the proposed work, creates a checkpoint, applies deterministic transforms, runs the project's own quality gates, and writes a machine-readable report.
 
-The first production path is **Create React App → Vite**. A deliberately gated **React → Next.js** planner establishes the extension point without pretending that routing, rendering, and data-fetching semantics can be migrated safely by a blind codemod.
+The first production path is **Create React App → Vite**. The **React → Next.js** path now performs deep readiness analysis and App Router mapping while keeping code mutation gated until routing, rendering, data-fetching, and behavioral-test decisions are approved.
 
 ## What the MVP does
 
@@ -18,6 +18,7 @@ The first production path is **Create React App → Vite**. A deliberately gated
 - Runs verification with sanitized environment variables, per-command timeouts, bounded output, fail-fast checks, and secret redaction.
 - Optionally verifies inside a resource-limited Docker container with no network access after dependency installation.
 - Supports up to three deterministic repair attempts and records every recipe and verification run in the report.
+- Inventories React Router paths, proposes App Router destinations, detects client-only boundaries and SSR hazards, classifies data fetching, and scores React → Next.js readiness.
 
 ## Requirements
 
@@ -45,6 +46,17 @@ Start with a scan and plan:
 repo-upgrader scan --repo /path/to/legacy-react-app --out scan.json
 repo-upgrader plan --repo /path/to/legacy-react-app --target vite --out plan.json
 ```
+
+Generate a gated React → Next.js readiness plan:
+
+```bash
+repo-upgrader plan \
+  --repo /path/to/react-app \
+  --target nextjs \
+  --out nextjs-readiness.json
+```
+
+The plan maps paths such as `/users/:id` to `app/users/[id]/page`, identifies files requiring `'use client'`, flags browser APIs and global CSS placement, classifies effect-based data fetching, and lists approval gates. `migrate --target nextjs` remains disabled until deterministic transforms can preserve verified behavior.
 
 Run the migration and automatically restore the original files if verification fails:
 
@@ -96,7 +108,7 @@ CLI
  └─ Reporter      versioned JSON evidence for every run
 ```
 
-Each target migration is intended to become a migration pack with four contracts: detection, planning, transformation, and verification. CRA → Vite implements that contract today. React → Next.js currently returns a `foundation-only` plan because safe automation requires route discovery, SSR compatibility classification, browser/API boundary detection, and behavioral tests.
+Each target migration is intended to become a migration pack with four contracts: detection, planning, transformation, and verification. CRA → Vite implements that contract today. React → Next.js implements detection and planning today; transformation remains gated behind explicit route, rendering, data-fetching, and behavioral-test approvals.
 
 ## Current limits
 
