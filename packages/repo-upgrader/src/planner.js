@@ -22,9 +22,12 @@ export function createPlan(scan, target = 'vite') {
     migration: 'cra-to-vite',
     supported: scan.capabilities.craToVite,
     confidence: scan.confidence,
-    preconditions: scan.capabilities.craToVite ? [] : ['Repository must be detected as Create React App'],
+    preconditions: scan.capabilities.craToVite ? [] : scan.risk?.blockers
+      ? scan.risk.findings.filter((item) => item.severity === 'blocker').map((item) => item.message)
+      : ['Repository must be detected as Create React App'],
+    risk: scan.risk || { level: 'unknown', blockers: 0, warnings: 0, findings: [] },
     changes,
-    verification: ['dependency install', 'build', 'test when configured', 'lint when configured'],
+    verification: ['dependency install', 'Vite production build', 'Vitest test suite when CRA tests are configured', 'lint when configured'],
     rollback: 'A byte-for-byte checkpoint is created before mutation.'
   };
 }
