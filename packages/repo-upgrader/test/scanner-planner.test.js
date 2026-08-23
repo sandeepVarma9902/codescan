@@ -33,3 +33,29 @@ test('CRA transform is deterministic and produces Vite inputs', async () => {
   assert.match(await fs.readFile(path.join(root, 'src/index.js'), 'utf8'), /import\.meta\.env\.VITE_API/);
   assert.equal((await fs.readFile(path.join(root, 'index.html'), 'utf8')).includes('type="module"'), true);
 });
+
+test('scanner blocks custom webpack overrides', async () => {
+  const root = await fixture();
+  const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json')));
+  pkg.dependencies['@craco/craco'] = '^7.0.0';
+  await fs.writeFile(path.join(root, 'package.json'), JSON.stringify(pkg));
+  const scan = await scanRepository(root);
+  assert.equal(scan.risk.level, 'high');
+  assert.equal(scan.capabilities.craToVite, false);
+  assert.match(createPlan(scan).preconditions[0], /CRACO/);
+});
+
+test('transform migrates CRA tests and env contracts', async () => {
+  const root = await fixture();
+  const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json')));
+  pkg.scripts.test = 'react-scripts test';
+  await fs.writeFile(path.join(root, 'package.json'), JSON.stringify(pkg));
+  await fs.writeFile(path.join(root, '.env'), 'REACT_APP_API=https://example.test\nSECRET=unchanged\n');
+  await fs.writeFile(path.join(root, 'src/setupTests.js'), "import '@testing-library/jest-dom';\n");
+  await transformCraToVite(root);
+  const migrated = JSON.parse(await fs.readFile(path.join(root, 'package.json')));
+  assert.equal(migrated.scripts.test, 'vitest run');
+  assert.ok(migrated.devDependencies.vitest);
+  assert.match(await fs.readFile(path.join(root, '.env'), 'utf8'), /^VITE_API=/);
+  assert.match(await fs.readFile(path.join(root, 'vite.config.js'), 'utf8'), /environment: 'jsdom'/);
+});

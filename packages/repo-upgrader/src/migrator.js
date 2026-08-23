@@ -10,9 +10,9 @@ export async function migrate(root, options = {}) {
   const resolved = path.resolve(root);
   const scan = await scanRepository(resolved);
   const plan = createPlan(scan, options.target || 'vite');
-  if (!plan.supported) throw new Error(plan.reason || plan.preconditions.join('; '));
+  if (!plan.supported && !options.force) throw new Error(`${plan.reason || plan.preconditions.join('; ')} Use --force only after reviewing the reported risks.`);
   const checkpointId = await createCheckpoint(resolved);
-  const report = { schemaVersion: 1, startedAt: new Date().toISOString(), migration: plan.migration, status: 'running', checkpointId, scan, plan, changes: [], verification: null };
+  const report = { schemaVersion: 1, startedAt: new Date().toISOString(), migration: plan.migration, status: 'running', checkpointId, forced: Boolean(options.force), scan, plan, changes: [], verification: null };
   try {
     report.changes = await transformCraToVite(resolved);
     report.verification = await verify(resolved, scan.project.packageManager, options);

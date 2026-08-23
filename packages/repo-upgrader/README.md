@@ -7,8 +7,10 @@ The first production path is **Create React App → Vite**. A deliberately gated
 ## What the MVP does
 
 - Detects CRA using multiple repository signals and inventories dependencies, scripts, entrypoints, environment-variable usage, and package manager.
+- Classifies migration risk and blocks custom webpack override stacks unless an operator explicitly uses `--force`.
 - Produces a structured, reviewable migration plan before changing files.
 - Replaces `react-scripts`, creates Vite configuration and HTML entry, updates scripts, and converts `REACT_APP_*` access to `import.meta.env.VITE_*`.
+- Migrates CRA's Jest command to Vitest/jsdom, carries forward `setupTests`, and renames public `.env` contracts while leaving secrets untouched.
 - Saves a byte-for-byte checkpoint outside the scanned file set before mutation.
 - Runs dependency installation, build, test, and lint when those scripts exist.
 - Can automatically roll back failed migrations or restore any checkpoint later.
@@ -50,6 +52,8 @@ repo-upgrader migrate \
   --rollback-on-failure
 ```
 
+High-risk repositories are stopped before mutation. After reviewing the JSON findings, an operator can deliberately override the gate with `--force`.
+
 For an offline transform, skip installation. Build/test/lint still run against already installed dependencies:
 
 ```bash
@@ -80,7 +84,7 @@ Each target migration is intended to become a migration pack with four contracts
 
 ## Current limits
 
-- The Vite pack covers conventional CRA layouts and entrypoints. Custom webpack overrides, service workers, proxy middleware, unusual HTML interpolation, and ejected CRA projects require additional recipes.
+- The Vite pack covers conventional CRA layouts and entrypoints. Custom webpack overrides are blocked; service workers and proxy middleware are surfaced as warnings for explicit review.
 - Environment variable references are converted in JavaScript and TypeScript source, but `.env` key renaming is left explicit to avoid changing deployment contracts silently.
 - Verification records command output but does not yet use an LLM repair loop. The next step is bounded remediation: classify a failure, select an approved recipe, re-run only affected checks, and stop after a configured attempt budget.
 - Checkpoints intentionally exclude generated directories, Git metadata, dependencies, and `.modernizer` itself.
