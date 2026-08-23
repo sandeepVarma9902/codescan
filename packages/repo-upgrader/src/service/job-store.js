@@ -31,7 +31,7 @@ export class JobStore {
 
   async createOrGet(input, idempotencyKey) {
     if (idempotencyKey) {
-      const existing = [...this.jobs.values()].find((job) => job.idempotencyKey === idempotencyKey);
+      const existing = [...this.jobs.values()].find((job) => job.idempotencyKey === idempotencyKey && job.accountId === input.accountId);
       if (existing) return { job: structuredClone(existing), created: false };
     }
     return { job: await this.create({ ...input, ...(idempotencyKey ? { idempotencyKey } : {}) }), created: true };
@@ -39,17 +39,20 @@ export class JobStore {
 
   get(id) { const job = this.jobs.get(id); return job ? structuredClone(job) : null; }
 
-  list({ status, limit = 50 } = {}) {
-    return [...this.jobs.values()].filter((job) => !status || job.status === status).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, Math.max(1, Math.min(Number(limit) || 50, 100))).map((job) => structuredClone(job));
+  list({ status, limit = 50, accountId } = {}) {
+    return [...this.jobs.values()].filter((job) => (!status || job.status === status) && (!accountId || job.accountId === accountId)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, Math.max(1, Math.min(Number(limit) || 50, 100))).map((job) => structuredClone(job));
   }
 
   findByDeliveryId(deliveryId) { const job = [...this.jobs.values()].find((item) => item.deliveryId === deliveryId); return job ? structuredClone(job) : null; }
+  findByIdempotencyKey(accountId, idempotencyKey) { const job = [...this.jobs.values()].find((item) => item.accountId === accountId && item.idempotencyKey === idempotencyKey); return job ? structuredClone(job) : null; }
 
-  usage() {
-    const jobs = [...this.jobs.values()];
+  usage(accountId, now = new Date()) {
+    const jobs = [...this.jobs.values()].filter((job) => !accountId || job.accountId === accountId);
+    const period = now.toISOString().slice(0, 7);
+    const periodJobs = jobs.filter((job) => job.createdAt.startsWith(period)).length;
     const byStatus = {};
     for (const job of jobs) byStatus[job.status] = (byStatus[job.status] || 0) + 1;
-    return { totalJobs: jobs.length, byStatus, successfulMigrations: byStatus.succeeded || 0, failedMigrations: byStatus.failed || 0 };
+    return { accountId: accountId || null, period, periodJobs, totalJobs: jobs.length, byStatus, successfulMigrations: byStatus.succeeded || 0, failedMigrations: byStatus.failed || 0 };
   }
 
   async cancel(id) {
