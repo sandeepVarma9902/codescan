@@ -69,7 +69,8 @@ test('Next.js plan exposes readiness analysis while keeping transforms gated', a
   const scan = await scanRepository(root);
   const plan = createPlan(scan, 'nextjs');
   assert.equal(plan.status, 'analysis-ready');
-  assert.equal(plan.supported, false);
+  assert.equal(plan.supported, true);
+  assert.equal(plan.strategy, 'spa-compatibility-bridge');
   assert.equal(plan.routeMappings[0].destination, 'app/settings/[tab]/page');
   assert.ok(plan.gates.includes('behavioral tests available'));
 });
