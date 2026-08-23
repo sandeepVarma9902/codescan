@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Repo Upgrader Control Panel</title>
+  <link rel="stylesheet" href="/dashboard/styles.css">
+</head>
+<body>
+  <header><div><span class="mark">RU</span><strong>Repo Upgrader</strong></div><span id="connection" class="status">Not connected</span></header>
+  <main>
+    <section class="hero">
+      <p class="eyebrow">Modernization control panel</p>
+      <h1>Move legacy React forward, safely.</h1>
+      <p>Launch a verified migration and follow every result from one calm workspace.</p>
+    </section>
+    <section id="connect-card" class="card connect">
+      <div><h2>Connect your account</h2><p>Paste a Repo Upgrader API key. It stays in this browser session.</p></div>
+      <form id="connect-form"><input id="api-key" type="password" required placeholder="ru_live_…" autocomplete="off"><button>Connect</button></form>
+    </section>
+    <div id="workspace" hidden>
+      <section class="metrics" aria-label="Migration summary">
+        <article><span>This month</span><strong id="month-count">—</strong></article>
+        <article><span>Success rate</span><strong id="success-rate">—</strong></article>
+        <article><span>Current plan</span><strong id="plan">—</strong></article>
+        <article><span>Total migrations</span><strong id="total-count">—</strong></article>
+      </section>
+      <section class="grid">
+        <article class="card launch">
+          <p class="eyebrow">New migration</p><h2>Choose the destination</h2>
+          <form id="job-form">
+            <label>GitHub repository<input id="repository" required placeholder="owner/repository" pattern="[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"></label>
+            <label>Modernization target<select id="target"><option value="vite">CRA → Vite</option><option value="nextjs">React → Next.js</option><option value="react-native">React → React Native</option></select></label>
+            <button>Start migration</button>
+          </form>
+          <p id="message" class="message" role="status"></p>
+        </article>
+        <article class="card activity">
+          <div class="section-title"><div><p class="eyebrow">Activity</p><h2>Recent migrations</h2></div><button id="refresh" class="secondary">Refresh</button></div>
+          <div id="jobs" class="jobs"><p class="empty">No migrations yet.</p></div>
+        </article>
+      </section>
+    </div>
+  </main>
+  <script type="module" src="/dashboard/app.js"></script>
+</body>
+</html>

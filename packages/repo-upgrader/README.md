@@ -272,6 +272,10 @@ docker compose -f compose.example.yml up -d
 
 `GET /healthz` reports process liveness and service version. `GET /readyz` reports whether the worker accepts new jobs along with active and queued counts. On `SIGTERM` or `SIGINT`, the service stops accepting work, allows active migrations up to 30 seconds to finish, closes HTTP connections, and returns a non-zero exit status when the drain deadline is exceeded. The container runs as the unprivileged Node user with all Linux capabilities removed by the Compose example.
 
+### Customer control panel
+
+Version 1.8 includes a responsive, dependency-free control panel at `/dashboard`. Customers connect with a managed API key stored only for the browser session, see monthly usage, plan, success rate, and migration totals, inspect recent job states, and launch CRA → Vite, React → Next.js, or React → React Native migrations. The UI is served by the same process and calls the tenant-isolated API, so it requires no separate frontend deployment or cross-origin credential configuration.
+
 Submit and inspect a job:
 
 ```bash

@@ -12,6 +12,10 @@ import { assertPolicy, PolicyRegistry } from './policy.js';
 import { CompositeAuth, CredentialStore } from './credential-store.js';
 import { AuditLog } from './audit-log.js';
 import { WebhookDispatcher } from './outbound-webhook.js';
+import fs from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+
+const DASHBOARD_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../dashboard');
 
 export async function startService(options = {}) {
   const accountStore = options.accountStore || await new AccountStore(options.accountStoreFile || path.resolve('.modernizer-service/accounts.json')).load();
@@ -38,7 +42,10 @@ export async function startService(options = {}) {
 
 async function route(request, response, context) {
   try {
-    if (request.method === 'GET' && request.url === '/healthz') return json(response, 200, { status: 'ok', service: 'repo-upgrader', version: '1.7.0' });
+    if (request.method === 'GET' && request.url === '/healthz') return json(response, 200, { status: 'ok', service: 'repo-upgrader', version: '1.8.0' });
+    if (request.method === 'GET' && ['/dashboard', '/dashboard/'].includes(request.url)) return asset(response, 'index.html', 'text/html; charset=utf-8');
+    if (request.method === 'GET' && request.url === '/dashboard/app.js') return asset(response, 'app.js', 'text/javascript; charset=utf-8');
+    if (request.method === 'GET' && request.url === '/dashboard/styles.css') return asset(response, 'styles.css', 'text/css; charset=utf-8');
     if (request.method === 'GET' && request.url === '/readyz') {
       const worker = typeof context.worker.status === 'function' ? context.worker.status() : { accepting: true };
       const ready = worker.accepting !== false;
@@ -138,6 +145,7 @@ function ownedJob(store, id, principal) { const job = store.get(id); return job 
 async function body(request) { return JSON.parse(await rawBody(request)); }
 async function rawBody(request) { const chunks = []; for await (const chunk of request) chunks.push(chunk); const value = Buffer.concat(chunks); if (value.length > 1024 * 1024) throw new Error('Payload too large.'); return value; }
 function json(response, status, value) { response.writeHead(status, { 'content-type': 'application/json' }); response.end(`${JSON.stringify(value)}\n`); }
+async function asset(response, file, contentType) { const value = await fs.readFile(path.join(DASHBOARD_ROOT, file)); response.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); response.end(value); }
 
 function createGitHubDelivery(options) {
   const appId = options.githubAppId ?? process.env.GITHUB_APP_ID;
