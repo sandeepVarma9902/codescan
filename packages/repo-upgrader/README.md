@@ -115,6 +115,33 @@ npm run build
 
 The test suite uses temporary CRA fixtures and does not require network access.
 
+## Hosted job API
+
+Version 0.4 adds a dependency-free service foundation with durable job state, authentication, bounded worker concurrency, GitHub webhook verification, and health/status endpoints.
+
+```bash
+export MODERNIZER_API_TOKEN='replace-with-a-long-random-token'
+export MODERNIZER_WEBHOOK_SECRET='github-webhook-secret'
+export MODERNIZER_ALLOWED_REPO_ROOT='/srv/modernizer/repositories'
+repo-upgrader serve --host 127.0.0.1 --port 8787
+```
+
+Submit and inspect a job:
+
+```bash
+curl -X POST http://127.0.0.1:8787/v1/jobs \
+  -H "Authorization: Bearer $MODERNIZER_API_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"repository":{"fullName":"owner/repository"},"target":"vite"}'
+
+curl http://127.0.0.1:8787/v1/jobs/JOB_ID \
+  -H "Authorization: Bearer $MODERNIZER_API_TOKEN"
+```
+
+`GET /healthz` is unauthenticated for load balancers. API jobs require bearer authentication. GitHub `repository_dispatch` webhooks require an exact `X-Hub-Signature-256` HMAC signature. State is persisted atomically with owner-only file permissions.
+
+GitHub repository jobs currently transition to `awaiting-github-app`. The service deliberately does not accept repository tokens in API payloads. The next provider adapter must exchange a signed GitHub App JWT for a short-lived installation token, clone into a disposable workspace, push the migration branch, and open the PR.
+
 ## Product roadmap
 
 1. Expand CRA recipes: proxies, service workers, SVG imports, Jest-to-Vitest, path aliases, and `.env` contract assistance.
