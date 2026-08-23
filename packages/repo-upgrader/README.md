@@ -152,6 +152,29 @@ The GitHub App requires repository contents read/write and pull requests read/wr
 
 Repository credentials are never accepted in API payloads, written to disk, placed in clone URLs, or returned in reports. The installation token is passed to Git through a temporary `GIT_ASKPASS` helper and removed with the disposable workspace. When GitHub App configuration is absent, remote jobs transition safely to `awaiting-github-app`.
 
+### Reliable submissions and operations
+
+API clients should attach an `Idempotency-Key` of 8–128 letters, digits, dots, colons, underscores, or hyphens. Repeating a submission with the same key returns the original job instead of creating another migration or charge. GitHub deliveries are similarly deduplicated with `X-GitHub-Delivery`.
+
+```bash
+curl -X POST http://127.0.0.1:8787/v1/jobs \
+  -H "Authorization: Bearer $MODERNIZER_API_TOKEN" \
+  -H 'Idempotency-Key: customer-42-upgrade-001' \
+  -H 'Content-Type: application/json' \
+  -d '{"repository":{"fullName":"owner/repository","installationId":123},"target":"vite"}'
+
+curl -H "Authorization: Bearer $MODERNIZER_API_TOKEN" \
+  'http://127.0.0.1:8787/v1/jobs?status=succeeded&limit=25'
+
+curl -H "Authorization: Bearer $MODERNIZER_API_TOKEN" \
+  http://127.0.0.1:8787/v1/usage
+
+curl -X DELETE -H "Authorization: Bearer $MODERNIZER_API_TOKEN" \
+  http://127.0.0.1:8787/v1/jobs/JOB_ID
+```
+
+Queued jobs resume after a service restart. Jobs that were running during a crash become `interrupted` for manual reconciliation, preventing an unsafe automatic replay after a branch or PR may already have been created. Only queued or waiting jobs can be cancelled.
+
 ## Product roadmap
 
 1. Expand CRA recipes: proxies, service workers, SVG imports, Jest-to-Vitest, path aliases, and `.env` contract assistance.
