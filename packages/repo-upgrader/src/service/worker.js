@@ -2,11 +2,12 @@ import path from 'node:path';
 import { migrate } from '../migrator.js';
 
 export class JobWorker {
-  constructor({ store, allowedRepositoryRoot, concurrency = 1, githubDelivery = null }) {
+  constructor({ store, allowedRepositoryRoot, concurrency = 1, githubDelivery = null, webhooks = null }) {
     this.store = store;
     this.allowedRoot = allowedRepositoryRoot ? path.resolve(allowedRepositoryRoot) : null;
     this.concurrency = Math.max(1, Math.min(Number(concurrency) || 1, 4));
     this.githubDelivery = githubDelivery;
+    this.webhooks = webhooks;
     this.queue = [];
     this.active = 0;
   }
@@ -29,22 +30,28 @@ export class JobWorker {
     try {
       if (!job.repositoryPath) {
         if (!this.githubDelivery) {
-          await this.store.update(id, { status: 'awaiting-github-app', message: 'Configure GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY to enable delivery.' });
+          await this.update(id, { status: 'awaiting-github-app', message: 'Configure GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY to enable delivery.' });
           return;
         }
-        await this.store.update(id, { status: 'running' });
+        await this.update(id, { status: 'running' });
         const delivery = await this.githubDelivery.deliver(job);
-        await this.store.update(id, { status: 'succeeded', delivery });
+        await this.update(id, { status: 'succeeded', delivery });
         return;
       }
       const repositoryPath = path.resolve(job.repositoryPath);
       if (!this.allowedRoot || !isWithin(this.allowedRoot, repositoryPath)) throw new Error('Repository path is outside MODERNIZER_ALLOWED_REPO_ROOT.');
-      await this.store.update(id, { status: 'running' });
+      await this.update(id, { status: 'running' });
       const report = await migrate(repositoryPath, { target: job.target, executor: job.executor || 'docker', rollbackOnFailure: true, maxRepairAttempts: job.maxRepairAttempts ?? 1 });
-      await this.store.update(id, { status: report.status === 'succeeded' ? 'succeeded' : 'failed', report });
+      await this.update(id, { status: report.status === 'succeeded' ? 'succeeded' : 'failed', report });
     } catch (error) {
-      await this.store.update(id, { status: 'failed', error: error.message });
+      await this.update(id, { status: 'failed', error: error.message });
     }
+  }
+
+  async update(id, patch) {
+    const job = await this.store.update(id, patch);
+    if (this.webhooks && ['running', 'succeeded', 'failed'].includes(job.status)) await this.webhooks.dispatch(`migration.${job.status}`, job);
+    return job;
   }
 }
 

@@ -11,6 +11,7 @@ import { billingUpdateFromEvent, verifyBillingSignature } from './billing-webhoo
 import { assertPolicy, PolicyRegistry } from './policy.js';
 import { CompositeAuth, CredentialStore } from './credential-store.js';
 import { AuditLog } from './audit-log.js';
+import { WebhookDispatcher } from './outbound-webhook.js';
 
 export async function startService(options = {}) {
   const accountStore = options.accountStore || await new AccountStore(options.accountStoreFile || path.resolve('.modernizer-service/accounts.json')).load();
@@ -18,12 +19,13 @@ export async function startService(options = {}) {
   const planResolver = (accountId, fallback) => accountStore.getPlan(accountId, fallback);
   const credentialStore = options.credentialStore || await new CredentialStore(options.credentialStoreFile || path.resolve('.modernizer-service/credentials.json'), { planResolver }).load();
   const auditLog = options.auditLog || await new AuditLog(options.auditFile || path.resolve('.modernizer-service/audit.jsonl')).load();
+  const webhooks = options.webhooks || WebhookDispatcher.fromEnvironment({ ...options, auditLog });
   const auth = options.auth || new CompositeAuth(ApiKeyRegistry.fromEnvironment({ ...options, planResolver }), credentialStore);
   const store = options.store || await new JobStore(options.storeFile || path.resolve('.modernizer-service/jobs.json')).load();
   const githubDelivery = options.githubDelivery || createGitHubDelivery(options);
-  const worker = options.worker || new JobWorker({ store, githubDelivery, allowedRepositoryRoot: options.allowedRepositoryRoot ?? process.env.MODERNIZER_ALLOWED_REPO_ROOT, concurrency: options.concurrency ?? process.env.MODERNIZER_CONCURRENCY });
+  const worker = options.worker || new JobWorker({ store, githubDelivery, webhooks, allowedRepositoryRoot: options.allowedRepositoryRoot ?? process.env.MODERNIZER_ALLOWED_REPO_ROOT, concurrency: options.concurrency ?? process.env.MODERNIZER_CONCURRENCY });
   if (!options.worker) worker.resumeQueued();
-  const server = http.createServer((request, response) => route(request, response, { auth, store, worker, accountStore, credentialStore, auditLog, policies, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
+  const server = http.createServer((request, response) => route(request, response, { auth, store, worker, accountStore, credentialStore, auditLog, webhooks, policies, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
   const port = options.port ?? (Number(process.env.MODERNIZER_PORT) || 8787);
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, options.host || '127.0.0.1', resolve); });
   return { server, store, worker, accountStore, credentialStore, auditLog, address: server.address() };
@@ -67,6 +69,7 @@ async function route(request, response, context) {
       const result = await context.store.createOrGet({ source: 'api', accountId: principal.accountId, plan: principal.plan, ...input }, idempotencyKey);
       if (result.created) {
         await audit(context, principal, 'migration.submitted', 'job', result.job.id, { target: result.job.target, repository: result.job.repository?.fullName || null });
+        await context.webhooks.dispatch('migration.queued', result.job);
         context.worker.enqueue(result.job);
       }
       return json(response, result.created ? 202 : 200, { ...result.job, deduplicated: !result.created });
@@ -79,7 +82,7 @@ async function route(request, response, context) {
     if (request.method === 'GET' && request.url === '/v1/usage') return json(response, 200, { plan: principal.plan, entitlements: principal.entitlements, ...context.store.usage(scope(principal)) });
     if (request.method === 'GET' && request.url === '/v1/analytics') return json(response, 200, context.store.analytics(scope(principal)));
     const cancel = request.method === 'DELETE' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)$/i);
-    if (cancel) { const existing = ownedJob(context.store, cancel[1], principal); if (!existing) return json(response, 404, { error: 'not_found' }); const cancelled = await context.store.cancel(cancel[1]); await audit(context, principal, 'migration.cancelled', 'job', cancelled.id, { target: cancelled.target }); return json(response, 200, cancelled); }
+    if (cancel) { const existing = ownedJob(context.store, cancel[1], principal); if (!existing) return json(response, 404, { error: 'not_found' }); const cancelled = await context.store.cancel(cancel[1]); await audit(context, principal, 'migration.cancelled', 'job', cancelled.id, { target: cancelled.target }); await context.webhooks.dispatch('migration.cancelled', cancelled); return json(response, 200, cancelled); }
     const match = request.method === 'GET' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)$/i);
     if (match) { const job = ownedJob(context.store, match[1], principal); return job ? json(response, 200, job) : json(response, 404, { error: 'not_found' }); }
     return json(response, 404, { error: 'not_found' });
