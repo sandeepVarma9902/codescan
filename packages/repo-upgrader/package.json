@@ -1,0 +1,24 @@
+{
+  "name": "repo-upgrader",
+  "version": "0.1.0",
+  "description": "Deterministic, verifiable React modernization CLI",
+  "type": "module",
+  "bin": {
+    "repo-upgrader": "./bin/repo-upgrader.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "lint": "node --check bin/repo-upgrader.js && node --check src/*.js",
+    "build": "node scripts/build.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ]
+}
