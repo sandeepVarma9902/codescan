@@ -42,7 +42,7 @@ export async function startService(options = {}) {
 
 async function route(request, response, context) {
   try {
-    if (request.method === 'GET' && request.url === '/healthz') return json(response, 200, { status: 'ok', service: 'repo-upgrader', version: '1.8.0' });
+    if (request.method === 'GET' && request.url === '/healthz') return json(response, 200, { status: 'ok', service: 'repo-upgrader', version: '1.9.0' });
     if (request.method === 'GET' && ['/dashboard', '/dashboard/'].includes(request.url)) return asset(response, 'index.html', 'text/html; charset=utf-8');
     if (request.method === 'GET' && request.url === '/dashboard/app.js') return asset(response, 'app.js', 'text/javascript; charset=utf-8');
     if (request.method === 'GET' && request.url === '/dashboard/styles.css') return asset(response, 'styles.css', 'text/css; charset=utf-8');
@@ -102,6 +102,8 @@ async function route(request, response, context) {
     if (cancel) { const existing = ownedJob(context.store, cancel[1], principal); if (!existing) return json(response, 404, { error: 'not_found' }); const cancelled = await context.store.cancel(cancel[1]); await audit(context, principal, 'migration.cancelled', 'job', cancelled.id, { target: cancelled.target }); await context.webhooks.dispatch('migration.cancelled', cancelled); return json(response, 200, cancelled); }
     const match = request.method === 'GET' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)$/i);
     if (match) { const job = ownedJob(context.store, match[1], principal); return job ? json(response, 200, job) : json(response, 404, { error: 'not_found' }); }
+    const report = request.method === 'GET' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)\/report$/i);
+    if (report) { const job = ownedJob(context.store, report[1], principal); if (!job) return json(response, 404, { error: 'not_found' }); return job.report ? json(response, 200, job.report) : json(response, 409, { error: 'report_not_available' }); }
     return json(response, 404, { error: 'not_found' });
   } catch (error) { return json(response, error.statusCode || 400, { error: error.message }); }
 }
