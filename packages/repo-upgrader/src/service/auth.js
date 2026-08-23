@@ -8,7 +8,8 @@ export const PLANS = {
 };
 
 export class ApiKeyRegistry {
-  constructor({ legacyToken, keys = [] } = {}) {
+  constructor({ legacyToken, keys = [], planResolver } = {}) {
+    this.planResolver = planResolver;
     this.entries = keys.map(validateEntry).map((entry) => ({ ...entry, digest: digest(entry.key), key: undefined }));
     if (legacyToken) this.entries.push({ accountId: 'default', plan: 'enterprise', role: 'admin', digest: digest(legacyToken) });
     if (this.entries.length === 0) throw new Error('MODERNIZER_API_TOKEN or MODERNIZER_API_KEYS_JSON is required.');
@@ -18,7 +19,9 @@ export class ApiKeyRegistry {
     if (!header?.startsWith('Bearer ')) return null;
     const candidate = digest(header.slice(7));
     const entry = this.entries.find((item) => timingSafeEqual(item.digest, candidate));
-    return entry ? { accountId: entry.accountId, plan: entry.plan, role: entry.role || 'member', entitlements: PLANS[entry.plan] } : null;
+    if (!entry) return null;
+    const plan = this.planResolver?.(entry.accountId, entry.plan) || entry.plan;
+    return { accountId: entry.accountId, plan, role: entry.role || 'member', entitlements: PLANS[plan] };
   }
 
   static fromEnvironment(options = {}) {
@@ -26,7 +29,7 @@ export class ApiKeyRegistry {
     if (!keys && process.env.MODERNIZER_API_KEYS_JSON) {
       try { keys = JSON.parse(process.env.MODERNIZER_API_KEYS_JSON); } catch { throw new Error('MODERNIZER_API_KEYS_JSON must be valid JSON.'); }
     }
-    return new ApiKeyRegistry({ legacyToken: options.token ?? process.env.MODERNIZER_API_TOKEN, keys: keys || [] });
+    return new ApiKeyRegistry({ legacyToken: options.token ?? process.env.MODERNIZER_API_TOKEN, keys: keys || [], planResolver: options.planResolver });
   }
 }
 
