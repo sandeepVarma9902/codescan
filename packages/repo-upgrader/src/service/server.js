@@ -3,12 +3,15 @@ import path from 'node:path';
 import { JobStore } from './job-store.js';
 import { JobWorker } from './worker.js';
 import { jobFromGitHubDispatch, verifyGitHubSignature } from './github-webhook.js';
+import { GitHubAppClient } from './github-app.js';
+import { GitHubDelivery } from './github-delivery.js';
 
 export async function startService(options = {}) {
   const token = options.token ?? process.env.MODERNIZER_API_TOKEN;
   if (!token) throw new Error('MODERNIZER_API_TOKEN is required.');
   const store = options.store || await new JobStore(options.storeFile || path.resolve('.modernizer-service/jobs.json')).load();
-  const worker = options.worker || new JobWorker({ store, allowedRepositoryRoot: options.allowedRepositoryRoot ?? process.env.MODERNIZER_ALLOWED_REPO_ROOT, concurrency: options.concurrency ?? process.env.MODERNIZER_CONCURRENCY });
+  const githubDelivery = options.githubDelivery || createGitHubDelivery(options);
+  const worker = options.worker || new JobWorker({ store, githubDelivery, allowedRepositoryRoot: options.allowedRepositoryRoot ?? process.env.MODERNIZER_ALLOWED_REPO_ROOT, concurrency: options.concurrency ?? process.env.MODERNIZER_CONCURRENCY });
   const server = http.createServer((request, response) => route(request, response, { token, store, worker, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET }));
   const port = options.port ?? (Number(process.env.MODERNIZER_PORT) || 8787);
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, options.host || '127.0.0.1', resolve); });
@@ -53,3 +56,10 @@ function authorized(request, token) { return request.headers.authorization === `
 async function body(request) { return JSON.parse(await rawBody(request)); }
 async function rawBody(request) { const chunks = []; for await (const chunk of request) chunks.push(chunk); const value = Buffer.concat(chunks); if (value.length > 1024 * 1024) throw new Error('Payload too large.'); return value; }
 function json(response, status, value) { response.writeHead(status, { 'content-type': 'application/json' }); response.end(`${JSON.stringify(value)}\n`); }
+
+function createGitHubDelivery(options) {
+  const appId = options.githubAppId ?? process.env.GITHUB_APP_ID;
+  const privateKey = options.githubPrivateKey ?? process.env.GITHUB_APP_PRIVATE_KEY;
+  if (!appId || !privateKey) return null;
+  return new GitHubDelivery({ client: new GitHubAppClient({ appId, privateKey, apiUrl: options.githubApiUrl }), workRoot: options.workRoot ?? process.env.MODERNIZER_WORK_ROOT });
+}
