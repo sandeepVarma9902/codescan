@@ -244,6 +244,23 @@ Version 1.5 records security and business events in an append-only JSON Lines au
 
 Use `GET /v1/audit-events?limit=100&action=migration.submitted` to retrieve recent activity. Member credentials receive only their account's events, while administrators can review the aggregate trail. Fields with names such as key, token, secret, or authorization are removed before persistence.
 
+### Outbound webhooks
+
+Version 1.6 delivers migration lifecycle events to customer systems. Configure one or more tenant-owned HTTPS endpoints:
+
+```bash
+export MODERNIZER_OUTBOUND_WEBHOOKS_JSON='[
+  {
+    "accountId":"customer-a",
+    "url":"https://example.com/webhooks/repo-upgrader",
+    "secret":"replace-with-at-least-16-characters",
+    "events":["migration.succeeded","migration.failed"]
+  }
+]'
+```
+
+Supported events are `migration.queued`, `migration.running`, `migration.succeeded`, `migration.failed`, and `migration.cancelled`. Deliveries include a unique ID and an `X-Repo-Upgrader-Signature` in `t=<unix timestamp>,v1=<HMAC-SHA256>` format, covering `<timestamp>.<exact body>`. Failed requests retry up to three times with exponential backoff. Final delivery outcomes are written to the audit trail without storing endpoint secrets or complete URLs.
+
 Submit and inspect a job:
 
 ```bash
