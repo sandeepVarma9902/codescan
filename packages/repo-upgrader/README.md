@@ -276,6 +276,8 @@ docker compose -f compose.example.yml up -d
 
 Version 1.8 includes a responsive, dependency-free control panel at `/dashboard`. Customers connect with a managed API key stored only for the browser session, see monthly usage, plan, success rate, and migration totals, inspect recent job states, and launch CRA → Vite, React → Next.js, or React → React Native migrations. The UI is served by the same process and calls the tenant-isolated API, so it requires no separate frontend deployment or cross-origin credential configuration.
 
+Version 1.9 adds live five-second refresh while migrations are active, a lifecycle timeline, safe cancellation for queued work, direct links to generated pull requests, failure details, and downloadable JSON verification reports. Reports are also available from `GET /v1/jobs/:id/report`; the endpoint returns `409` until evidence exists and preserves the same tenant ownership rules as job lookup.
+
 Submit and inspect a job:
 
 ```bash
