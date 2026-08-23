@@ -197,6 +197,16 @@ Built-in entitlements provide a vendor-neutral billing boundary:
 
 Quota enforcement occurs after idempotency lookup, so a retried request returns its original job without consuming another unit. A future Stripe/Paddle adapter can update account-plan assignments without changing migration execution or tenant isolation.
 
+### Billing lifecycle
+
+Version 1.2 adds a provider-neutral subscription webhook compatible with Stripe-style subscription events. Configure the signing secret and point the provider at `POST /webhooks/billing`:
+
+```bash
+export MODERNIZER_BILLING_WEBHOOK_SECRET='whsec_replace_me'
+```
+
+The webhook accepts `customer.subscription.created`, `customer.subscription.updated`, and `customer.subscription.deleted`. Subscription metadata must contain `accountId` and `plan` (`free`, `starter`, `pro`, or `enterprise`). Signatures cover the exact request body and timestamp, expire after five minutes, and are compared in constant time. Applied event IDs are persisted for replay protection. Active subscription plans immediately override the API key's configured fallback plan; cancellation or an inactive subscription safely returns the account to Free.
+
 Submit and inspect a job:
 
 ```bash
