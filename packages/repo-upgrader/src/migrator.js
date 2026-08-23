@@ -5,6 +5,7 @@ import { scanRepository } from './scanner.js';
 import { transformCraToVite } from './transform.js';
 import { verify } from './verifier.js';
 import { applyDeterministicRepairs } from './repair.js';
+import { transformReactToNext } from './nextjs-transform.js';
 import { STATE_DIR, writeJson } from './utils.js';
 
 export async function migrate(root, options = {}) {
@@ -15,7 +16,7 @@ export async function migrate(root, options = {}) {
   const checkpointId = await createCheckpoint(resolved);
   const report = { schemaVersion: 1, startedAt: new Date().toISOString(), migration: plan.migration, status: 'running', checkpointId, forced: Boolean(options.force), executionPolicy: { executor: options.executor || 'local', timeoutMs: options.timeoutMs || 600000, maxRepairAttempts: options.maxRepairAttempts || 0 }, scan, plan, changes: [], repairs: [], verificationRuns: [], verification: null };
   try {
-    report.changes = await transformCraToVite(resolved);
+    report.changes = targetTransform(options.target || 'vite') === 'nextjs' ? await transformReactToNext(resolved) : await transformCraToVite(resolved);
     const maxRepairs = Math.max(0, Math.min(Number(options.maxRepairAttempts) || 0, 3));
     for (let attempt = 0; attempt <= maxRepairs; attempt += 1) {
       report.verification = await verify(resolved, scan.project.packageManager, options);
@@ -41,3 +42,5 @@ export async function migrate(root, options = {}) {
   report.reportFile = reportFile;
   return report;
 }
+
+function targetTransform(target) { return target === 'nextjs' ? 'nextjs' : 'vite'; }

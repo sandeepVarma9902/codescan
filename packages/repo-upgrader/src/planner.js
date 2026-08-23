@@ -1,19 +1,21 @@
 export function createPlan(scan, target = 'vite') {
   if (target === 'nextjs') {
     const analysis = scan.nextjs;
+    const bridgeSupported = analysis?.readiness?.level === 'high' && analysis.readiness.blockers === 0;
     return {
       schemaVersion: 1,
       migration: 'react-to-nextjs',
       status: analysis ? 'analysis-ready' : 'foundation-only',
-      supported: false,
-      reason: 'Automated transforms remain gated until route, rendering, data-fetching, and behavioral-test approvals are satisfied.',
+      supported: bridgeSupported,
+      strategy: 'spa-compatibility-bridge',
+      reason: bridgeSupported ? 'Eligible for a client-rendered App Router compatibility bridge; route-by-route server migration remains gated.' : 'Compatibility bridge is gated until readiness is high or an operator explicitly uses --force.',
       readiness: analysis?.readiness,
       routeMappings: analysis?.routes || [],
       clientBoundaries: analysis?.clientBoundaries || [],
       dataFetching: analysis?.dataFetching || [],
       findings: analysis?.findings || [],
       gates: analysis?.gates || [],
-      phases: ['approve route-to-App-Router mapping', 'establish root layout and providers', 'separate server and client component boundaries', 'move eligible data fetching to the server', 'transform routes incrementally', 'verify behavior and rendering']
+      phases: ['create verified client-rendered App Router compatibility bridge', 'approve route-to-App-Router mapping', 'separate server and client component boundaries', 'move eligible data fetching to the server', 'transform routes incrementally', 'verify behavior and rendering']
     };
   }
   if (target !== 'vite') throw new Error(`Unsupported target: ${target}`);
