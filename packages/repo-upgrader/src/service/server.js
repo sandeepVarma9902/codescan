@@ -28,12 +28,22 @@ export async function startService(options = {}) {
   const server = http.createServer((request, response) => route(request, response, { auth, store, worker, accountStore, credentialStore, auditLog, webhooks, policies, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
   const port = options.port ?? (Number(process.env.MODERNIZER_PORT) || 8787);
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, options.host || '127.0.0.1', resolve); });
-  return { server, store, worker, accountStore, credentialStore, auditLog, address: server.address() };
+  const close = async (closeOptions) => {
+    const drained = typeof worker.shutdown === 'function' ? await worker.shutdown(closeOptions) : true;
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    return { drained };
+  };
+  return { server, store, worker, accountStore, credentialStore, auditLog, address: server.address(), close };
 }
 
 async function route(request, response, context) {
   try {
-    if (request.method === 'GET' && request.url === '/healthz') return json(response, 200, { status: 'ok' });
+    if (request.method === 'GET' && request.url === '/healthz') return json(response, 200, { status: 'ok', service: 'repo-upgrader', version: '1.7.0' });
+    if (request.method === 'GET' && request.url === '/readyz') {
+      const worker = typeof context.worker.status === 'function' ? context.worker.status() : { accepting: true };
+      const ready = worker.accepting !== false;
+      return json(response, ready ? 200 : 503, { status: ready ? 'ready' : 'draining', worker });
+    }
     if (request.method === 'POST' && request.url === '/webhooks/github') return githubWebhook(request, response, context);
     if (request.method === 'POST' && request.url === '/webhooks/billing') return billingWebhook(request, response, context);
     const principal = context.auth.authenticate(request.headers.authorization);

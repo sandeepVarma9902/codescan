@@ -261,6 +261,17 @@ export MODERNIZER_OUTBOUND_WEBHOOKS_JSON='[
 
 Supported events are `migration.queued`, `migration.running`, `migration.succeeded`, `migration.failed`, and `migration.cancelled`. Deliveries include a unique ID and an `X-Repo-Upgrader-Signature` in `t=<unix timestamp>,v1=<HMAC-SHA256>` format, covering `<timestamp>.<exact body>`. Failed requests retry up to three times with exponential backoff. Final delivery outcomes are written to the audit trail without storing endpoint secrets or complete URLs.
 
+### Production deployment
+
+Version 1.7 adds a non-root OCI `Containerfile`, a hardened Compose example, unauthenticated liveness and readiness probes, and graceful process draining. Build and run from the package directory:
+
+```bash
+docker build -f Containerfile -t repo-upgrader:1.7.0 .
+docker compose -f compose.example.yml up -d
+```
+
+`GET /healthz` reports process liveness and service version. `GET /readyz` reports whether the worker accepts new jobs along with active and queued counts. On `SIGTERM` or `SIGINT`, the service stops accepting work, allows active migrations up to 30 seconds to finish, closes HTTP connections, and returns a non-zero exit status when the drain deadline is exceeded. The container runs as the unprivileged Node user with all Linux capabilities removed by the Compose example.
+
 Submit and inspect a job:
 
 ```bash

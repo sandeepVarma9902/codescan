@@ -1,6 +1,6 @@
 {
   "name": "repo-upgrader",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Deterministic, verifiable React modernization CLI",
   "type": "module",
   "bin": {

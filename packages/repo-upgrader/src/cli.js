@@ -22,6 +22,16 @@ export async function runCli(args) {
   if (command === 'serve') {
     const service = await startService({ port: numberValue(args, '--port', 8787), host: value(args, '--host') || '127.0.0.1' });
     console.log(`Repo Upgrader service listening on http://${service.address.address}:${service.address.port}`);
+    let closing = false;
+    const shutdown = async (signal) => {
+      if (closing) return;
+      closing = true;
+      console.log(`Received ${signal}; draining active migrations.`);
+      const { drained } = await service.close({ timeoutMs: 30_000 });
+      if (!drained) { console.error('Shutdown deadline reached before all migrations completed.'); process.exitCode = 1; }
+    };
+    process.once('SIGTERM', () => shutdown('SIGTERM'));
+    process.once('SIGINT', () => shutdown('SIGINT'));
     return;
   }
   if (command === 'rollback') return console.log(`Restored checkpoint ${await rollback(root, value(args, '--checkpoint'))}`);
