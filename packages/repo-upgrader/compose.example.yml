@@ -1,0 +1,26 @@
+services:
+  repo-upgrader:
+    build:
+      context: .
+      dockerfile: Containerfile
+    restart: unless-stopped
+    init: true
+    ports:
+      - "8787:8787"
+    environment:
+      MODERNIZER_API_TOKEN: ${MODERNIZER_API_TOKEN:?required}
+      MODERNIZER_WEBHOOK_SECRET: ${MODERNIZER_WEBHOOK_SECRET:-}
+      MODERNIZER_BILLING_WEBHOOK_SECRET: ${MODERNIZER_BILLING_WEBHOOK_SECRET:-}
+      MODERNIZER_ALLOWED_REPO_ROOT: /work
+      MODERNIZER_WORK_ROOT: /work
+    volumes:
+      - repo_upgrader_data:/app/.modernizer-service
+      - repo_upgrader_work:/work
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  repo_upgrader_data:
+  repo_upgrader_work:
