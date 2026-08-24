@@ -10,6 +10,8 @@ COPY --chown=node:node src ./src
 COPY --chown=node:node scripts ./scripts
 COPY --chown=node:node dashboard ./dashboard
 
+RUN npm install --omit=dev --ignore-scripts && npm cache clean --force
+
 RUN mkdir -p /data /work && chown node:node /data /work
 USER node
 VOLUME ["/data", "/work"]
