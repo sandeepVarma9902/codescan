@@ -37,6 +37,7 @@ export async function scanRepository(root) {
   if (await exists(path.join(absoluteRoot, 'src', 'serviceWorker.js')) || await exists(path.join(absoluteRoot, 'src', 'service-worker.js'))) riskFindings.push(finding('service-worker', 'warning', 'src/', 'Service-worker behavior requires manual verification after migration.'));
   const pathAliases = await hasPathAliases(absoluteRoot);
   const proxyRoutes = await detectProxyRoutes(absoluteRoot);
+  const serviceWorker = await detectServiceWorker(absoluteRoot, sourceRecords);
   const risk = summarizeRisk(riskFindings);
   const nextjs = analyzeNextReadiness(sourceRecords, dependencies);
   const reactNative = analyzeReactNativeReadiness(sourceRecords.filter(({ file }) => /^src\/.*\.[jt]sx?$/.test(file)), dependencies);
@@ -52,13 +53,20 @@ export async function scanRepository(root) {
     scripts: pkg.scripts || {},
     entrypoints,
     envUsages,
-    craCompatibility: { pathAliases, svgComponentImports, proxyRoutes },
+    craCompatibility: { pathAliases, svgComponentImports, proxyRoutes, serviceWorker },
     risk,
     nextjs,
     reactNative,
     inventory: { files: files.length, sourceFiles: sourceFiles.length },
     capabilities: { craToVite: craSignals.length >= 2 && risk.blockers === 0, reactToNext: 'compatibility-bridge', reactToReactNative: 'analysis-ready' }
   };
+}
+
+async function detectServiceWorker(root, sourceRecords) {
+  const implementation = ['src/serviceWorkerRegistration.js', 'src/serviceWorkerRegistration.ts', 'src/serviceWorker.js', 'src/service-worker.js'].find((file) => sourceRecords.some((record) => record.file === file));
+  if (!implementation) return { detected: false, strategy: null };
+  const registration = sourceRecords.find(({ content }) => /serviceWorker(?:Registration)?\.register\s*\(\s*\)/.test(content));
+  return { detected: true, implementation, registrationFile: registration?.file || null, strategy: registration ? 'vite-plugin-pwa-auto-update' : 'manual-review' };
 }
 
 async function hasPathAliases(root) {

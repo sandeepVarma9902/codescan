@@ -331,13 +331,9 @@ curl -X DELETE -H "Authorization: Bearer $MODERNIZER_API_TOKEN" \
 
 Queued jobs resume after a service restart. Jobs that were running during a crash become `interrupted` for manual reconciliation, preventing an unsafe automatic replay after a branch or PR may already have been created. Only queued or waiting jobs can be cancelled.
 
-## Product roadmap
+## Product status
 
-1. Expand CRA recipes: proxies, service workers, SVG imports, Jest-to-Vitest, path aliases, and `.env` contract assistance.
-2. Add Git-aware checkpoints and PR evidence (commits per migration phase, diff summaries, risk scoring).
-3. Implement the React → Next.js analyzer and a gated App Router migration pack.
-4. Expand the sandbox policy with read-only source mounts, disposable workspaces, and organization-specific egress rules.
-5. Add a hosted API/worker model, GitHub App, billing, organization policies, and migration analytics.
+The original MVP roadmap is implemented: deterministic CRA → Vite migration (including tests, aliases, SVG components, conventional proxies, environment contracts, and service-worker registration), gated React → Next.js App Router and React → Expo Router conversion, Git-aware delivery, verification and rollback, isolated execution, hosted workers, tenant controls, billing handoff, analytics, SDK/CLI access, and release automation. Remaining production work is deployment-specific: configure infrastructure, GitHub and Stripe accounts, secrets, DNS, monitoring destinations, and customer support processes.
 
 ## Production platform
 
@@ -352,7 +348,7 @@ Configure `GITHUB_APP_SLUG`, `MODERNIZER_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY`, a
 The machine-readable API contract is available without authentication at `/openapi.json`. The package also exports `RepoUpgraderClient` from `sdk/index.js`:
 
 ```js
-import { RepoUpgraderClient } from 'repo-upgrader/sdk/index.js';
+import { RepoUpgraderClient } from 'repo-upgrader/sdk';
 
 const client = new RepoUpgraderClient({ baseUrl: process.env.REPO_UPGRADER_API_URL, apiKey: process.env.REPO_UPGRADER_API_KEY });
 const job = await client.submit({ repository: { fullName: 'owner/repository' }, target: 'vite' });
@@ -367,6 +363,12 @@ repo-upgrader remote submit --github-repo owner/repository --target vite
 repo-upgrader remote jobs
 repo-upgrader remote usage
 ```
+
+## Advanced migration and releases
+
+Version 3.0 recognizes conventional CRA service-worker registration and replaces it with `vite-plugin-pwa` auto-update registration while retaining ambiguous custom workers for manual review. The existing gated Next.js compatibility bridge and Expo Router conversion remain conservative: unsupported browser behavior and interactive DOM semantics stop automatic mutation instead of creating deceptively broken output.
+
+Run `npm run benchmark` to exercise a deterministic 100-component CRA fixture with a five-second scan, plan, and transform budget. Tagged releases named `repo-upgrader-v*` run tests, lint, build, benchmark, and package inspection; then publish npm provenance when `NPM_TOKEN` is configured and an immutable container to GitHub Container Registry. See `SECURITY.md` for disclosure and release requirements. Creating a version tag is intentionally a maintainer action because it publishes external artifacts.
 
 ## Security note
 

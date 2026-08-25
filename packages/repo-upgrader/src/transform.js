@@ -13,8 +13,10 @@ export async function transformCraToVite(root) {
   const pathAliases = await hasConfiguredPaths(root);
   const svgFiles = await findSvgComponentImports(root);
   const proxyRoutes = await readProxyRoutes(root);
+  const serviceWorker = await findServiceWorkerRegistration(root);
   if (pathAliases) pkg.devDependencies['vite-tsconfig-paths'] ||= '^5.1.0';
   if (svgFiles.length) pkg.devDependencies['vite-plugin-svgr'] ||= '^4.3.0';
+  if (serviceWorker) pkg.devDependencies['vite-plugin-pwa'] ||= '^0.21.0';
   const migratesTests = pkg.scripts?.test?.includes('react-scripts');
   if (migratesTests) {
     pkg.scripts.test = 'vitest run';
@@ -37,11 +39,16 @@ export async function transformCraToVite(root) {
   for (const file of await walk(root)) {
     if (!/\.[jt]sx?$/.test(file)) continue;
     const before = await fs.readFile(file, 'utf8');
-    const after = before
+    let after = before
       .replace(/process\.env\.REACT_APP_([A-Z0-9_]+)/g, 'import.meta.env.VITE_$1')
       .replace(/process\.env\.PUBLIC_URL/g, 'import.meta.env.BASE_URL')
       .replace(/process\.env\.NODE_ENV/g, 'import.meta.env.MODE')
       .replace(/import\s*{\s*ReactComponent\s+as\s+(\w+)\s*}\s*from\s*(['"])([^'"]+\.svg)\2\s*;?/g, 'import $1 from $2$3?react$2;');
+    if (serviceWorker?.registrationFile === path.relative(root, file)) {
+      after = after
+        .replace(/import\s+\*\s+as\s+serviceWorker(?:Registration)?\s+from\s+['"][^'"]+['"]\s*;?/, "import { registerSW } from 'virtual:pwa-register';")
+        .replace(/serviceWorker(?:Registration)?\.register\s*\(\s*\)\s*;?/, 'registerSW({ immediate: true });');
+    }
     if (after !== before) { await fs.writeFile(file, after); changes.push(path.relative(root, file)); }
   }
   for (const name of ['.env', '.env.local', '.env.development', '.env.production', '.env.test']) {
@@ -57,11 +64,22 @@ export async function transformCraToVite(root) {
   const plugins = ['react()'];
   if (pathAliases) { imports.push(`import tsconfigPaths from 'vite-tsconfig-paths';`); plugins.push('tsconfigPaths()'); }
   if (svgFiles.length) { imports.push(`import svgr from 'vite-plugin-svgr';`); plugins.push('svgr()'); }
+  if (serviceWorker) { imports.push(`import { VitePWA } from 'vite-plugin-pwa';`); plugins.push("VitePWA({ registerType: 'autoUpdate' })"); }
   const proxyConfig = proxyRoutes.length ? `,\n  server: { proxy: { ${proxyRoutes.map(({ route, target }) => `${JSON.stringify(route)}: { target: ${JSON.stringify(target)}, changeOrigin: true }`).join(', ')} } }` : '';
   const config = `${imports.join('\n')}\n\nexport default defineConfig({ plugins: [${plugins.join(', ')}]${testConfig}${proxyConfig} });\n`;
   await fs.writeFile(path.join(root, 'vite.config.js'), config);
   changes.push('vite.config.js');
   return [...new Set(changes)].sort();
+}
+
+async function findServiceWorkerRegistration(root) {
+  const implementations = ['src/serviceWorkerRegistration.js', 'src/serviceWorkerRegistration.ts', 'src/serviceWorker.js', 'src/service-worker.js'];
+  if (!(await Promise.all(implementations.map((file) => exists(path.join(root, file))))).some(Boolean)) return null;
+  for (const file of await walk(root)) {
+    if (!/\.[jt]sx?$/.test(file)) continue;
+    if (/serviceWorker(?:Registration)?\.register\s*\(\s*\)/.test(await fs.readFile(file, 'utf8'))) return { registrationFile: path.relative(root, file) };
+  }
+  return null;
 }
 
 async function hasConfiguredPaths(root) {
