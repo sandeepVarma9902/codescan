@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     rootDir: packages/repo-upgrader
-    buildCommand: npm install
+    buildCommand: npm install --workspaces=false --package-lock=false
     startCommand: node bin/repo-upgrader.js serve --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
     envVars:
