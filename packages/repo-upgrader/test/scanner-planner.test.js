@@ -121,12 +121,13 @@ test('Next.js plan exposes readiness analysis while keeping transforms gated', a
   assert.ok(plan.gates.includes('behavioral tests available'));
 });
 
-test('React Native plan exposes Expo conversion mappings while mutation stays gated', async () => {
+test('React Native plan exposes Expo conversion mappings and approval recipes', async () => {
   const root = await fixture();
   await fs.writeFile(path.join(root, 'src/App.jsx'), `export default function App(){ return <div><p>Hello</p><button>Open</button></div> }`);
   const plan = createPlan(await scanRepository(root), 'react-native');
   assert.equal(plan.status, 'analysis-ready');
-  assert.equal(plan.supported, false);
+  assert.equal(plan.supported, true);
+  assert.equal(plan.approvalRequired, true);
   assert.equal(plan.framework, 'expo-router');
   assert.ok(plan.primitiveMappings.some((item) => item.from === 'div' && item.to === 'View'));
   assert.ok(plan.gates.includes('iOS and Android behavioral tests available'));
