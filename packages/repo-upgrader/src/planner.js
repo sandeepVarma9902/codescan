@@ -49,6 +49,7 @@ export function createPlan(scan, target = 'vite') {
   if (scan.craCompatibility?.pathAliases) changes.push({ id: 'path-aliases', action: 'preserve TypeScript/JavaScript path aliases with vite-tsconfig-paths' });
   if (scan.craCompatibility?.svgComponentImports?.length) changes.push({ id: 'svg-components', action: 'convert CRA ReactComponent SVG imports with vite-plugin-svgr' });
   if (scan.craCompatibility?.proxyRoutes?.length) changes.push({ id: 'development-proxy', action: 'translate conventional setupProxy routes to Vite server.proxy' });
+  if (scan.craCompatibility?.serviceWorker?.strategy === 'vite-plugin-pwa-auto-update') changes.push({ id: 'service-worker', action: 'replace conventional CRA registration with vite-plugin-pwa auto-update registration' });
   return {
     schemaVersion: 1,
     migration: 'cra-to-vite',
