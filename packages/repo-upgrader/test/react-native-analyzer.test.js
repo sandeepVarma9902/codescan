@@ -18,15 +18,25 @@ test('inventories DOM primitives and native replacements', () => {
   assert.equal(analysis.automaticConversionEligible, true);
 });
 
-test('blocks browser APIs and unmapped DOM elements', () => {
+test('recommends approved recipes for browser APIs and unmapped DOM elements', () => {
   const analysis = analyzeReactNativeReadiness([{ file: 'src/Map.jsx', content: `export const Map = () => <canvas>{localStorage.getItem('x')}</canvas>;` }], {});
-  assert.equal(analysis.readiness.level, 'blocked');
-  assert.ok(analysis.findings.some((item) => item.code === 'browser-platform-api'));
-  assert.ok(analysis.findings.some((item) => item.code === 'unmapped-dom-elements'));
+  assert.equal(analysis.readiness.level, 'approval-required');
+  assert.equal(analysis.readiness.blockers, 0);
+  assert.equal(analysis.convertible, true);
+  assert.ok(analysis.findings.some((item) => item.code === 'browser-storage'));
+  assert.ok(analysis.findings.some((item) => item.code === 'custom-native-components'));
 });
 
-test('gates interactive web semantics from automatic conversion', () => {
+test('maps interactive web semantics to an approval recipe', () => {
   const analysis = analyzeReactNativeReadiness([{ file: 'src/Button.jsx', content: `export const Button = () => <button onClick={() => {}}>Open</button>;` }], {});
-  assert.equal(analysis.automaticConversionEligible, false);
-  assert.ok(analysis.findings.some((item) => item.code === 'interactive-dom-semantics'));
+  assert.equal(analysis.automaticConversionEligible, true);
+  assert.ok(analysis.findings.some((item) => item.code === 'interactive-native-controls'));
+  assert.ok(analysis.recommendations.some((item) => item.id === 'native-primitives'));
+});
+
+test('selects recipes for storage, files, location, auth, notifications, maps, charts, and styling', () => {
+  const content = `import './app.css'; const value=localStorage.getItem('x'); document.cookie; navigator.geolocation; new Notification('x'); const file=<input type="file"/>; const map=<GoogleMap/>; const chart=<canvas/>;`;
+  const analysis = analyzeReactNativeReadiness([{ file: 'src/App.jsx', content }], { '@mui/material': '^6.0.0', 'react-router-dom': '^7.0.0' });
+  const recipes = new Set(analysis.recommendations.map((item) => item.id));
+  for (const expected of ['nativewind-styling', 'async-storage', 'expo-document-picker', 'expo-location', 'expo-notifications', 'expo-auth-session', 'native-maps', 'native-charts', 'native-paper', 'expo-router']) assert.ok(recipes.has(expected), expected);
 });

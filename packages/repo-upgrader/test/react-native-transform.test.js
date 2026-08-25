@@ -12,6 +12,14 @@ test('converts safe structural JSX to React Native primitives', () => {
   assert.match(converted, /EXPO_PUBLIC_COPY/);
 });
 
+test('converts common controls and router contracts to native equivalents', () => {
+  const converted = convertSafeJsx(`import { Link, Routes, Route } from 'react-router-dom'; export default function App(){ return <Routes><Route path="/" element={<form><button onClick={() => {}}>Save</button><input placeholder="Name"/><a href="/help">Help</a></form>} /></Routes> }`);
+  assert.match(converted, /Pressable onPress/);
+  assert.match(converted, /TextInput placeholder/);
+  assert.match(converted, /<Link href="\/help">/);
+  assert.doesNotMatch(converted, /react-router-dom/);
+});
+
 test('creates an Expo Router workspace and preserves converted source', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'repo-upgrader-expo-'));
   await fs.mkdir(path.join(root, 'src'));
@@ -31,4 +39,6 @@ test('creates an Expo Router workspace and preserves converted source', async ()
   assert.match(await fs.readFile(path.join(root, '.env'), 'utf8'), /^EXPO_PUBLIC_API=/);
   await assert.rejects(fs.access(path.join(root, 'native-src/index.tsx')));
   assert.ok(changes.includes('app/index.tsx'));
+  assert.ok(changes.includes('migration-decisions.json'));
+  assert.ok(changes.includes('native-src/platform/index.ts'));
 });
