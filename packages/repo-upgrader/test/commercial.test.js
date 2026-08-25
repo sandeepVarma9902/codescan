@@ -72,6 +72,8 @@ test('public demo mode needs no secret and never accepts local execution', async
   const base = `http://127.0.0.1:${service.address.port}`;
   try {
     assert.deepEqual(await (await fetch(`${base}/v1/demo-config`)).json(), { enabled: true, notice: 'Public preview: remote repositories are not cloned or executed.' });
+    const workflow = await (await fetch(`${base}/github-actions.yml`)).text();
+    assert.match(workflow, /uses: sandeepVarma9902\/codescan\/packages\/repo-upgrader@main/);
     const response = await fetch(`${base}/v1/jobs`, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'demo-request-123' }, body: JSON.stringify({ repositoryPath: root, target: 'vite' }) });
     assert.equal(response.status, 403);
   } finally { await service.close(); }
