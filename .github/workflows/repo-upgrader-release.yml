@@ -1,0 +1,49 @@
+name: Repo Upgrader Release
+
+on:
+  push:
+    tags:
+      - 'repo-upgrader-v*'
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/repo-upgrader
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: packages/repo-upgrader/package-lock.json
+      - run: npm install
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run benchmark
+      - run: npm pack --dry-run
+      - name: Publish npm package with provenance
+        if: ${{ env.NODE_AUTH_TOKEN != '' }}
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish immutable container
+        working-directory: .
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}/repo-upgrader:${GITHUB_REF_NAME}"
+          docker build -f packages/repo-upgrader/Containerfile -t "$image" packages/repo-upgrader
+          docker push "$image"
