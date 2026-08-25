@@ -92,6 +92,20 @@ test('conventional CRA proxy middleware becomes Vite server proxy', async () => 
   await fs.access(path.join(root, 'src/setupProxy.js'));
 });
 
+test('conventional CRA service-worker registration becomes vite-plugin-pwa', async () => {
+  const root = await fixture();
+  await fs.writeFile(path.join(root, 'src/serviceWorkerRegistration.js'), 'export function register() {}\n');
+  await fs.writeFile(path.join(root, 'src/index.js'), "import * as serviceWorkerRegistration from './serviceWorkerRegistration';\nserviceWorkerRegistration.register();\n");
+  const scan = await scanRepository(root);
+  assert.deepEqual(scan.craCompatibility.serviceWorker, { detected: true, implementation: 'src/serviceWorkerRegistration.js', registrationFile: 'src/index.js', strategy: 'vite-plugin-pwa-auto-update' });
+  assert.ok(createPlan(scan).changes.some((change) => change.id === 'service-worker'));
+  await transformCraToVite(root);
+  const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json')));
+  assert.ok(pkg.devDependencies['vite-plugin-pwa']);
+  assert.match(await fs.readFile(path.join(root, 'vite.config.js'), 'utf8'), /VitePWA\(\{ registerType: 'autoUpdate' \}\)/);
+  assert.match(await fs.readFile(path.join(root, 'src/index.js'), 'utf8'), /registerSW\(\{ immediate: true \}\)/);
+});
+
 test('Next.js plan exposes readiness analysis while keeping transforms gated', async () => {
   const root = await fixture();
   const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json')));
