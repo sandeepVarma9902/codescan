@@ -25,13 +25,14 @@ const DASHBOARD_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const OPENAPI_FILE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../openapi.json');
 
 export async function startService(options = {}) {
+  const demoMode = options.demoMode ?? process.env.MODERNIZER_DEMO_MODE === 'true';
   const accountStore = options.accountStore || await new AccountStore(options.accountStoreFile || path.resolve('.modernizer-service/accounts.json')).load();
   const policies = options.policyRegistry || PolicyRegistry.fromEnvironment(options);
   const planResolver = (accountId, fallback) => accountStore.getPlan(accountId, fallback);
   const credentialStore = options.credentialStore || await new CredentialStore(options.credentialStoreFile || path.resolve('.modernizer-service/credentials.json'), { planResolver }).load();
   const auditLog = options.auditLog || await new AuditLog(options.auditFile || path.resolve('.modernizer-service/audit.jsonl')).load();
   const webhooks = options.webhooks || WebhookDispatcher.fromEnvironment({ ...options, auditLog });
-  const auth = options.auth || new CompositeAuth(ApiKeyRegistry.fromEnvironment({ ...options, planResolver }), credentialStore);
+  const auth = options.auth || (demoMode ? { authenticate: () => ({ accountId: 'public-demo', plan: 'pro', role: 'operator', entitlements: { monthlyJobs: 100, targets: ['vite', 'nextjs', 'react-native'] } }) } : new CompositeAuth(ApiKeyRegistry.fromEnvironment({ ...options, planResolver }), credentialStore));
   const database = !options.store && (options.databaseUrl || process.env.DATABASE_URL) ? await createPostgresJobStore(options.databaseUrl || process.env.DATABASE_URL) : null;
   const store = options.store || database?.store || await new JobStore(options.storeFile || path.resolve('.modernizer-service/jobs.json')).load();
   const githubDelivery = options.githubDelivery || createGitHubDelivery(options);
@@ -40,7 +41,7 @@ export async function startService(options = {}) {
   const redis = !options.worker && (options.redisUrl || process.env.REDIS_URL) ? await createRedisJobQueue(options.redisUrl || process.env.REDIS_URL) : null;
   const worker = options.worker || (redis ? new DistributedWorker({ queue: redis.queue, runner, concurrency: options.concurrency ?? process.env.MODERNIZER_CONCURRENCY }).start() : runner);
   if (!options.worker && !redis) await worker.resumeQueued();
-  const server = http.createServer((request, response) => route(request, response, { auth, store, worker, accountStore, credentialStore, auditLog, webhooks, reportStore, policies, githubAppSlug: options.githubAppSlug ?? process.env.GITHUB_APP_SLUG, dashboardUrl: options.dashboardUrl ?? process.env.MODERNIZER_DASHBOARD_URL, stripeSecretKey: options.stripeSecretKey ?? process.env.STRIPE_SECRET_KEY, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
+  const server = http.createServer((request, response) => route(request, response, { auth, demoMode, store, worker, accountStore, credentialStore, auditLog, webhooks, reportStore, policies, githubAppSlug: options.githubAppSlug ?? process.env.GITHUB_APP_SLUG, dashboardUrl: options.dashboardUrl ?? process.env.MODERNIZER_DASHBOARD_URL, stripeSecretKey: options.stripeSecretKey ?? process.env.STRIPE_SECRET_KEY, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
   server.requestTimeout = 30_000;
   server.headersTimeout = 15_000;
   const port = options.port ?? (Number(process.env.MODERNIZER_PORT) || 8787);
@@ -61,6 +62,7 @@ async function route(request, response, context) {
     if (request.method === 'GET' && request.url === '/dashboard/app.js') return asset(response, 'app.js', 'text/javascript; charset=utf-8');
     if (request.method === 'GET' && request.url === '/dashboard/styles.css') return asset(response, 'styles.css', 'text/css; charset=utf-8');
     if (request.method === 'GET' && request.url === '/openapi.json') { const value=await fs.readFile(OPENAPI_FILE);response.writeHead(200,{'content-type':'application/json','cache-control':'public, max-age=300'});return response.end(value); }
+    if (request.method === 'GET' && request.url === '/v1/demo-config') return json(response, 200, { enabled: context.demoMode, notice: context.demoMode ? 'Public preview: remote repositories are not cloned or executed.' : null });
     if (request.method === 'GET' && request.url === '/readyz') {
       const worker = typeof context.worker.status === 'function' ? context.worker.status() : { accepting: true };
       const ready = worker.accepting !== false;
@@ -97,6 +99,7 @@ async function route(request, response, context) {
     if (request.method === 'POST' && request.url === '/v1/jobs') {
       requirePermission(principal, 'submit');
       const input = validateJob(await body(request));
+      if (context.demoMode && input.repositoryPath) { const error = new Error('Local repository execution is disabled in public demo mode.'); error.statusCode = 403; throw error; }
       const idempotencyKey = request.headers['idempotency-key'];
       if (idempotencyKey && !/^[A-Za-z0-9_.:-]{8,128}$/.test(idempotencyKey)) throw new Error('Invalid Idempotency-Key.');
       const duplicate = idempotencyKey && await context.store.findByIdempotencyKey(principal.accountId, idempotencyKey);

@@ -1,10 +1,14 @@
 services:
   - type: web
-    name: codescan-proxy
+    name: repo-upgrader-demo
     runtime: node
-    rootDir: apps/web
-    buildCommand: pnpm install --prod
-    startCommand: node server.js
+    plan: free
+    rootDir: packages/repo-upgrader
+    buildCommand: npm install
+    startCommand: node bin/repo-upgrader.js serve --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
     envVars:
-      - key: GROQ_API_KEY
-        sync: false
+      - key: MODERNIZER_DEMO_MODE
+        value: "true"
+      - key: NODE_VERSION
+        value: "22"

@@ -63,3 +63,16 @@ test('JavaScript SDK sends authentication and idempotency headers', async () => 
   assert.equal(received.options.headers.authorization, 'Bearer key');
   assert.equal(received.options.headers['idempotency-key'], 'request-123');
 });
+
+test('public demo mode needs no secret and never accepts local execution', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'repo-upgrader-demo-'));
+  const store = await new JobStore(path.join(root, 'jobs.json')).load();
+  const worker = { enqueue() {}, status: () => ({ accepting: true }), shutdown: async () => true };
+  const service = await startService({ demoMode: true, port: 0, store, worker, accountStoreFile: path.join(root, 'accounts.json'), credentialStoreFile: path.join(root, 'credentials.json'), auditFile: path.join(root, 'audit.jsonl') });
+  const base = `http://127.0.0.1:${service.address.port}`;
+  try {
+    assert.deepEqual(await (await fetch(`${base}/v1/demo-config`)).json(), { enabled: true, notice: 'Public preview: remote repositories are not cloned or executed.' });
+    const response = await fetch(`${base}/v1/jobs`, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'demo-request-123' }, body: JSON.stringify({ repositoryPath: root, target: 'vite' }) });
+    assert.equal(response.status, 403);
+  } finally { await service.close(); }
+});
