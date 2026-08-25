@@ -14,6 +14,11 @@ import { AuditLog } from './audit-log.js';
 import { WebhookDispatcher } from './outbound-webhook.js';
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { createPostgresJobStore } from './postgres-job-store.js';
+import { createRedisJobQueue } from './redis-job-queue.js';
+import { DistributedWorker } from './distributed-worker.js';
+import { prometheusMetrics } from './metrics.js';
+import { createObjectReportStore } from './report-store.js';
 
 const DASHBOARD_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../dashboard');
 
@@ -25,16 +30,21 @@ export async function startService(options = {}) {
   const auditLog = options.auditLog || await new AuditLog(options.auditFile || path.resolve('.modernizer-service/audit.jsonl')).load();
   const webhooks = options.webhooks || WebhookDispatcher.fromEnvironment({ ...options, auditLog });
   const auth = options.auth || new CompositeAuth(ApiKeyRegistry.fromEnvironment({ ...options, planResolver }), credentialStore);
-  const store = options.store || await new JobStore(options.storeFile || path.resolve('.modernizer-service/jobs.json')).load();
+  const database = !options.store && (options.databaseUrl || process.env.DATABASE_URL) ? await createPostgresJobStore(options.databaseUrl || process.env.DATABASE_URL) : null;
+  const store = options.store || database?.store || await new JobStore(options.storeFile || path.resolve('.modernizer-service/jobs.json')).load();
   const githubDelivery = options.githubDelivery || createGitHubDelivery(options);
-  const worker = options.worker || new JobWorker({ store, githubDelivery, webhooks, allowedRepositoryRoot: options.allowedRepositoryRoot ?? process.env.MODERNIZER_ALLOWED_REPO_ROOT, concurrency: options.concurrency ?? process.env.MODERNIZER_CONCURRENCY });
-  if (!options.worker) worker.resumeQueued();
-  const server = http.createServer((request, response) => route(request, response, { auth, store, worker, accountStore, credentialStore, auditLog, webhooks, policies, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
+  const reportStore = options.reportStore || ((options.reportBucket || process.env.MODERNIZER_REPORT_BUCKET) ? await createObjectReportStore({ bucket: options.reportBucket, endpoint: options.s3Endpoint }) : null);
+  const runner = new JobWorker({ store, githubDelivery, webhooks, reportStore, allowedRepositoryRoot: options.allowedRepositoryRoot ?? process.env.MODERNIZER_ALLOWED_REPO_ROOT, concurrency: options.concurrency ?? process.env.MODERNIZER_CONCURRENCY });
+  const redis = !options.worker && (options.redisUrl || process.env.REDIS_URL) ? await createRedisJobQueue(options.redisUrl || process.env.REDIS_URL) : null;
+  const worker = options.worker || (redis ? new DistributedWorker({ queue: redis.queue, runner, concurrency: options.concurrency ?? process.env.MODERNIZER_CONCURRENCY }).start() : runner);
+  if (!options.worker && !redis) await worker.resumeQueued();
+  const server = http.createServer((request, response) => route(request, response, { auth, store, worker, accountStore, credentialStore, auditLog, webhooks, reportStore, policies, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
   const port = options.port ?? (Number(process.env.MODERNIZER_PORT) || 8787);
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, options.host || '127.0.0.1', resolve); });
   const close = async (closeOptions) => {
     const drained = typeof worker.shutdown === 'function' ? await worker.shutdown(closeOptions) : true;
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await redis?.close(); await database?.close();
     return { drained };
   };
   return { server, store, worker, accountStore, credentialStore, auditLog, address: server.address(), close };
@@ -42,7 +52,7 @@ export async function startService(options = {}) {
 
 async function route(request, response, context) {
   try {
-    if (request.method === 'GET' && request.url === '/healthz') return json(response, 200, { status: 'ok', service: 'repo-upgrader', version: '2.0.0' });
+    if (request.method === 'GET' && request.url === '/healthz') return json(response, 200, { status: 'ok', service: 'repo-upgrader', version: '2.1.0' });
     if (request.method === 'GET' && ['/dashboard', '/dashboard/'].includes(request.url)) return asset(response, 'index.html', 'text/html; charset=utf-8');
     if (request.method === 'GET' && request.url === '/dashboard/app.js') return asset(response, 'app.js', 'text/javascript; charset=utf-8');
     if (request.method === 'GET' && request.url === '/dashboard/styles.css') return asset(response, 'styles.css', 'text/css; charset=utf-8');
@@ -51,6 +61,7 @@ async function route(request, response, context) {
       const ready = worker.accepting !== false;
       return json(response, ready ? 200 : 503, { status: ready ? 'ready' : 'draining', worker });
     }
+    if (request.method === 'GET' && request.url === '/metrics') { const value = await prometheusMetrics(context.store, context.worker); response.writeHead(200, { 'content-type': 'text/plain; version=0.0.4' }); return response.end(value); }
     if (request.method === 'POST' && request.url === '/webhooks/github') return githubWebhook(request, response, context);
     if (request.method === 'POST' && request.url === '/webhooks/billing') return billingWebhook(request, response, context);
     const principal = context.auth.authenticate(request.headers.authorization);
@@ -79,31 +90,31 @@ async function route(request, response, context) {
       const input = validateJob(await body(request));
       const idempotencyKey = request.headers['idempotency-key'];
       if (idempotencyKey && !/^[A-Za-z0-9_.:-]{8,128}$/.test(idempotencyKey)) throw new Error('Invalid Idempotency-Key.');
-      const duplicate = idempotencyKey && context.store.findByIdempotencyKey(principal.accountId, idempotencyKey);
+      const duplicate = idempotencyKey && await context.store.findByIdempotencyKey(principal.accountId, idempotencyKey);
       if (duplicate) return json(response, 200, { ...duplicate, deduplicated: true });
-      assertEntitled(principal, input.target, context.store.usage(principal.accountId));
+      assertEntitled(principal, input.target, await context.store.usage(principal.accountId));
       assertPolicy(context.policies.get(principal.accountId), input);
       const result = await context.store.createOrGet({ source: 'api', accountId: principal.accountId, plan: principal.plan, ...input }, idempotencyKey);
       if (result.created) {
         await audit(context, principal, 'migration.submitted', 'job', result.job.id, { target: result.job.target, repository: result.job.repository?.fullName || null });
         await context.webhooks.dispatch('migration.queued', result.job);
-        context.worker.enqueue(result.job);
+        await context.worker.enqueue(result.job);
       }
       return json(response, result.created ? 202 : 200, { ...result.job, deduplicated: !result.created });
     }
     if (request.method === 'GET' && request.url?.startsWith('/v1/jobs?')) {
       const url = new URL(request.url, 'http://service');
-      return json(response, 200, { jobs: context.store.list({ status: url.searchParams.get('status') || undefined, limit: url.searchParams.get('limit'), accountId: scope(principal) }) });
+      return json(response, 200, { jobs: await context.store.list({ status: url.searchParams.get('status') || undefined, limit: url.searchParams.get('limit'), accountId: scope(principal) }) });
     }
-    if (request.method === 'GET' && request.url === '/v1/jobs') return json(response, 200, { jobs: context.store.list({ accountId: scope(principal) }) });
-    if (request.method === 'GET' && request.url === '/v1/usage') return json(response, 200, { plan: principal.plan, entitlements: principal.entitlements, ...context.store.usage(scope(principal)) });
-    if (request.method === 'GET' && request.url === '/v1/analytics') return json(response, 200, context.store.analytics(scope(principal)));
+    if (request.method === 'GET' && request.url === '/v1/jobs') return json(response, 200, { jobs: await context.store.list({ accountId: scope(principal) }) });
+    if (request.method === 'GET' && request.url === '/v1/usage') return json(response, 200, { plan: principal.plan, entitlements: principal.entitlements, ...await context.store.usage(scope(principal)) });
+    if (request.method === 'GET' && request.url === '/v1/analytics') return json(response, 200, await context.store.analytics(scope(principal)));
     const cancel = request.method === 'DELETE' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)$/i);
-    if (cancel) { const existing = ownedJob(context.store, cancel[1], principal); if (!existing) return json(response, 404, { error: 'not_found' }); const cancelled = await context.store.cancel(cancel[1]); await audit(context, principal, 'migration.cancelled', 'job', cancelled.id, { target: cancelled.target }); await context.webhooks.dispatch('migration.cancelled', cancelled); return json(response, 200, cancelled); }
+    if (cancel) { const existing = await ownedJob(context.store, cancel[1], principal); if (!existing) return json(response, 404, { error: 'not_found' }); const cancelled = await context.store.cancel(cancel[1]); await audit(context, principal, 'migration.cancelled', 'job', cancelled.id, { target: cancelled.target }); await context.webhooks.dispatch('migration.cancelled', cancelled); return json(response, 200, cancelled); }
     const match = request.method === 'GET' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)$/i);
-    if (match) { const job = ownedJob(context.store, match[1], principal); return job ? json(response, 200, job) : json(response, 404, { error: 'not_found' }); }
+    if (match) { const job = await ownedJob(context.store, match[1], principal); return job ? json(response, 200, job) : json(response, 404, { error: 'not_found' }); }
     const report = request.method === 'GET' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)\/report$/i);
-    if (report) { const job = ownedJob(context.store, report[1], principal); if (!job) return json(response, 404, { error: 'not_found' }); return job.report ? json(response, 200, job.report) : json(response, 409, { error: 'report_not_available' }); }
+    if (report) { const job = await ownedJob(context.store, report[1], principal); if (!job) return json(response, 404, { error: 'not_found' }); const value = job.report || (job.reportRef && context.reportStore ? await context.reportStore.get(job.reportRef) : null); return value ? json(response, 200, value) : json(response, 409, { error: 'report_not_available' }); }
     return json(response, 404, { error: 'not_found' });
   } catch (error) { return json(response, error.statusCode || 400, { error: error.message }); }
 }
@@ -126,10 +137,10 @@ async function githubWebhook(request, response, context) {
   input.deliveryId = request.headers['x-github-delivery'];
   input.accountId = `github:${input.repository.installationId || 'uninstalled'}`;
   input.plan = 'trial';
-  const duplicate = input.deliveryId && context.store.findByDeliveryId(input.deliveryId);
+  const duplicate = input.deliveryId && await context.store.findByDeliveryId(input.deliveryId);
   if (duplicate) return json(response, 200, { ...duplicate, deduplicated: true });
   const job = await context.store.create(input);
-  context.worker.enqueue(job);
+  await context.worker.enqueue(job);
   return json(response, 202, job);
 }
 
@@ -143,7 +154,7 @@ function validateJob(input) {
 function scope(principal) { return principal.role === 'admin' ? undefined : principal.accountId; }
 function requireAdmin(principal) { if (principal.role !== 'admin') { const error = new Error('Administrator access is required.'); error.statusCode = 403; throw error; } }
 function audit(context, principal, action, resourceType, resourceId, metadata) { return context.auditLog.record({ accountId: principal.accountId, actorId: principal.credentialId || principal.role, action, resourceType, resourceId, metadata }); }
-function ownedJob(store, id, principal) { const job = store.get(id); return job && (principal.role === 'admin' || job.accountId === principal.accountId) ? job : null; }
+async function ownedJob(store, id, principal) { const job = await store.get(id); return job && (principal.role === 'admin' || job.accountId === principal.accountId) ? job : null; }
 async function body(request) { return JSON.parse(await rawBody(request)); }
 async function rawBody(request) { const chunks = []; for await (const chunk of request) chunks.push(chunk); const value = Buffer.concat(chunks); if (value.length > 1024 * 1024) throw new Error('Payload too large.'); return value; }
 function json(response, status, value) { response.writeHead(status, { 'content-type': 'application/json' }); response.end(`${JSON.stringify(value)}\n`); }

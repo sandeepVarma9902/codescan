@@ -2,12 +2,13 @@ import path from 'node:path';
 import { migrate } from '../migrator.js';
 
 export class JobWorker {
-  constructor({ store, allowedRepositoryRoot, concurrency = 1, githubDelivery = null, webhooks = null }) {
+  constructor({ store, allowedRepositoryRoot, concurrency = 1, githubDelivery = null, webhooks = null, reportStore = null }) {
     this.store = store;
     this.allowedRoot = allowedRepositoryRoot ? path.resolve(allowedRepositoryRoot) : null;
     this.concurrency = Math.max(1, Math.min(Number(concurrency) || 1, 4));
     this.githubDelivery = githubDelivery;
     this.webhooks = webhooks;
+    this.reportStore = reportStore;
     this.queue = [];
     this.active = 0;
     this.accepting = true;
@@ -20,7 +21,7 @@ export class JobWorker {
     queueMicrotask(() => this.drain());
   }
 
-  resumeQueued() { for (const job of this.store.list({ status: 'queued', limit: 100 })) this.enqueue(job); }
+  async resumeQueued() { for (const job of await this.store.list({ status: 'queued', limit: 100 })) await this.enqueue(job); }
 
   async drain() {
     while (this.active < this.concurrency && this.queue.length) {
@@ -31,7 +32,7 @@ export class JobWorker {
   }
 
   async run(id) {
-    const job = this.store.get(id);
+    const job = await this.store.get(id);
     if (!job || job.status !== 'queued') return;
     try {
       if (!job.repositoryPath) {
@@ -48,7 +49,8 @@ export class JobWorker {
       if (!this.allowedRoot || !isWithin(this.allowedRoot, repositoryPath)) throw new Error('Repository path is outside MODERNIZER_ALLOWED_REPO_ROOT.');
       await this.update(id, { status: 'running' });
       const report = await migrate(repositoryPath, { target: job.target, executor: job.executor || 'docker', rollbackOnFailure: true, maxRepairAttempts: job.maxRepairAttempts ?? 1 });
-      await this.update(id, { status: report.status === 'succeeded' ? 'succeeded' : 'failed', report });
+      const reportRef = this.reportStore ? await this.reportStore.put(job.accountId || 'default', id, report) : null;
+      await this.update(id, { status: report.status === 'succeeded' ? 'succeeded' : 'failed', ...(reportRef ? { reportRef, reportSummary: { status: report.status, checks: report.verification?.length || report.checks?.length || 0 } } : { report }) });
     } catch (error) {
       await this.update(id, { status: 'failed', error: error.message });
     }

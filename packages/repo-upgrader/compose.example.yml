@@ -13,6 +13,8 @@ services:
       MODERNIZER_BILLING_WEBHOOK_SECRET: ${MODERNIZER_BILLING_WEBHOOK_SECRET:-}
       MODERNIZER_ALLOWED_REPO_ROOT: /work
       MODERNIZER_WORK_ROOT: /work
+      DATABASE_URL: postgres://repo_upgrader:${POSTGRES_PASSWORD:?required}@postgres:5432/repo_upgrader
+      REDIS_URL: redis://redis:6379
     volumes:
       - repo_upgrader_data:/app/.modernizer-service
       - repo_upgrader_work:/work
@@ -20,7 +22,37 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: repo_upgrader
+      POSTGRES_USER: repo_upgrader
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+    volumes:
+      - repo_upgrader_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U repo_upgrader"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - repo_upgrader_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
 volumes:
   repo_upgrader_data:
   repo_upgrader_work:
+  repo_upgrader_postgres:
+  repo_upgrader_redis:

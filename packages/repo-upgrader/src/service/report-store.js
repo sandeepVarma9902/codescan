@@ -1,0 +1,7 @@
+export class ObjectReportStore{
+ constructor(client,{bucket,prefix='reports'}={}){if(!bucket)throw new Error('Report storage requires a bucket.');this.client=client;this.bucket=bucket;this.prefix=prefix;}
+ key(accountId,jobId){return`${this.prefix}/${encodeURIComponent(accountId)}/${jobId}.json`;}
+ async put(accountId,jobId,report){const Key=this.key(accountId,jobId),Body=JSON.stringify(report);await this.client.put({Bucket:this.bucket,Key,Body,ContentType:'application/json',ServerSideEncryption:'AES256'});return{bucket:this.bucket,key:Key};}
+ async get(reference){const response=await this.client.get({Bucket:reference.bucket,Key:reference.key});if(typeof response.Body?.transformToString==='function')return JSON.parse(await response.Body.transformToString());const chunks=[];for await(const chunk of response.Body)chunks.push(chunk);return JSON.parse(Buffer.concat(chunks).toString('utf8'));}
+}
+export async function createObjectReportStore(options={}){const{S3Client,PutObjectCommand,GetObjectCommand}=await import('@aws-sdk/client-s3');const sdk=new S3Client({region:options.region||process.env.AWS_REGION||'us-east-1',endpoint:options.endpoint||process.env.S3_ENDPOINT,forcePathStyle:Boolean(options.endpoint||process.env.S3_ENDPOINT)});return new ObjectReportStore({put:(input)=>sdk.send(new PutObjectCommand(input)),get:(input)=>sdk.send(new GetObjectCommand(input))},{bucket:options.bucket||process.env.MODERNIZER_REPORT_BUCKET,prefix:options.prefix});}
