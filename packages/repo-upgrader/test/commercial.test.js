@@ -45,7 +45,7 @@ test('OpenAPI is public and tenant admins remain account scoped', async () => {
   const base = `http://127.0.0.1:${service.address.port}`;
   try {
     const spec = await (await fetch(`${base}/openapi.json`)).json();
-    assert.equal(spec.info.version, '2.2.0');
+    assert.equal(spec.info.version, '3.0.0');
     const jobs = await (await fetch(`${base}/v1/jobs`, { headers: { authorization: 'Bearer ignored' } })).json();
     assert.deepEqual(jobs.jobs, []);
   } finally { await service.close(); }
