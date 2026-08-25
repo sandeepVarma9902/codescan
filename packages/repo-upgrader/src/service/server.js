@@ -19,8 +19,10 @@ import { createRedisJobQueue } from './redis-job-queue.js';
 import { DistributedWorker } from './distributed-worker.js';
 import { prometheusMetrics } from './metrics.js';
 import { createObjectReportStore } from './report-store.js';
+import { createBillingPortal, githubInstallUrl, requirePermission } from './commercial.js';
 
 const DASHBOARD_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../dashboard');
+const OPENAPI_FILE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../openapi.json');
 
 export async function startService(options = {}) {
   const accountStore = options.accountStore || await new AccountStore(options.accountStoreFile || path.resolve('.modernizer-service/accounts.json')).load();
@@ -38,7 +40,7 @@ export async function startService(options = {}) {
   const redis = !options.worker && (options.redisUrl || process.env.REDIS_URL) ? await createRedisJobQueue(options.redisUrl || process.env.REDIS_URL) : null;
   const worker = options.worker || (redis ? new DistributedWorker({ queue: redis.queue, runner, concurrency: options.concurrency ?? process.env.MODERNIZER_CONCURRENCY }).start() : runner);
   if (!options.worker && !redis) await worker.resumeQueued();
-  const server = http.createServer((request, response) => route(request, response, { auth, store, worker, accountStore, credentialStore, auditLog, webhooks, reportStore, policies, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
+  const server = http.createServer((request, response) => route(request, response, { auth, store, worker, accountStore, credentialStore, auditLog, webhooks, reportStore, policies, githubAppSlug: options.githubAppSlug ?? process.env.GITHUB_APP_SLUG, dashboardUrl: options.dashboardUrl ?? process.env.MODERNIZER_DASHBOARD_URL, stripeSecretKey: options.stripeSecretKey ?? process.env.STRIPE_SECRET_KEY, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
   const port = options.port ?? (Number(process.env.MODERNIZER_PORT) || 8787);
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, options.host || '127.0.0.1', resolve); });
   const close = async (closeOptions) => {
@@ -52,10 +54,11 @@ export async function startService(options = {}) {
 
 async function route(request, response, context) {
   try {
-    if (request.method === 'GET' && request.url === '/healthz') return json(response, 200, { status: 'ok', service: 'repo-upgrader', version: '2.1.0' });
+    if (request.method === 'GET' && request.url === '/healthz') return json(response, 200, { status: 'ok', service: 'repo-upgrader', version: '2.2.0' });
     if (request.method === 'GET' && ['/dashboard', '/dashboard/'].includes(request.url)) return asset(response, 'index.html', 'text/html; charset=utf-8');
     if (request.method === 'GET' && request.url === '/dashboard/app.js') return asset(response, 'app.js', 'text/javascript; charset=utf-8');
     if (request.method === 'GET' && request.url === '/dashboard/styles.css') return asset(response, 'styles.css', 'text/css; charset=utf-8');
+    if (request.method === 'GET' && request.url === '/openapi.json') { const value=await fs.readFile(OPENAPI_FILE);response.writeHead(200,{'content-type':'application/json','cache-control':'public, max-age=300'});return response.end(value); }
     if (request.method === 'GET' && request.url === '/readyz') {
       const worker = typeof context.worker.status === 'function' ? context.worker.status() : { accepting: true };
       const ready = worker.accepting !== false;
@@ -66,9 +69,12 @@ async function route(request, response, context) {
     if (request.method === 'POST' && request.url === '/webhooks/billing') return billingWebhook(request, response, context);
     const principal = context.auth.authenticate(request.headers.authorization);
     if (!principal) return json(response, 401, { error: 'unauthorized' });
+    if (request.method === 'GET' && request.url === '/v1/integrations/github') { requirePermission(principal,'integrations'); const installUrl=githubInstallUrl({slug:context.githubAppSlug,accountId:principal.accountId,secret:context.webhookSecret}); return installUrl?json(response,200,{installUrl}):json(response,503,{error:'github_app_not_configured'}); }
+    if (request.method === 'POST' && request.url === '/v1/billing/portal') { requirePermission(principal,'billing'); const account=context.accountStore.get(principal.accountId); const result=await createBillingPortal({secretKey:context.stripeSecretKey,customerId:account?.customerId,returnUrl:context.dashboardUrl||'http://127.0.0.1:8787/dashboard'}); return json(response,200,result); }
     if (request.method === 'POST' && request.url === '/v1/api-keys') {
-      requireAdmin(principal);
+      requirePermission(principal, 'credentials');
       const input = await body(request);
+      if (principal.role !== 'platform-admin' && input.accountId !== principal.accountId) { const error=new Error('Credentials can only be created for your own account.');error.statusCode=403;throw error; }
       const result = await context.credentialStore.create({ accountId: input.accountId, plan: input.plan, role: input.role, name: input.name });
       await audit(context, principal, 'credential.created', 'credential', result.credential.id, { targetAccountId: input.accountId, role: result.credential.role });
       return json(response, 201, result);
@@ -87,6 +93,7 @@ async function route(request, response, context) {
       return json(response, 200, { events: context.auditLog.list({ accountId: scope(principal), action: url.searchParams.get('action') || undefined, limit: url.searchParams.get('limit') }) });
     }
     if (request.method === 'POST' && request.url === '/v1/jobs') {
+      requirePermission(principal, 'submit');
       const input = validateJob(await body(request));
       const idempotencyKey = request.headers['idempotency-key'];
       if (idempotencyKey && !/^[A-Za-z0-9_.:-]{8,128}$/.test(idempotencyKey)) throw new Error('Invalid Idempotency-Key.');
@@ -110,7 +117,7 @@ async function route(request, response, context) {
     if (request.method === 'GET' && request.url === '/v1/usage') return json(response, 200, { plan: principal.plan, entitlements: principal.entitlements, ...await context.store.usage(scope(principal)) });
     if (request.method === 'GET' && request.url === '/v1/analytics') return json(response, 200, await context.store.analytics(scope(principal)));
     const cancel = request.method === 'DELETE' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)$/i);
-    if (cancel) { const existing = await ownedJob(context.store, cancel[1], principal); if (!existing) return json(response, 404, { error: 'not_found' }); const cancelled = await context.store.cancel(cancel[1]); await audit(context, principal, 'migration.cancelled', 'job', cancelled.id, { target: cancelled.target }); await context.webhooks.dispatch('migration.cancelled', cancelled); return json(response, 200, cancelled); }
+    if (cancel) { requirePermission(principal, 'cancel'); const existing = await ownedJob(context.store, cancel[1], principal); if (!existing) return json(response, 404, { error: 'not_found' }); const cancelled = await context.store.cancel(cancel[1]); await audit(context, principal, 'migration.cancelled', 'job', cancelled.id, { target: cancelled.target }); await context.webhooks.dispatch('migration.cancelled', cancelled); return json(response, 200, cancelled); }
     const match = request.method === 'GET' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)$/i);
     if (match) { const job = await ownedJob(context.store, match[1], principal); return job ? json(response, 200, job) : json(response, 404, { error: 'not_found' }); }
     const report = request.method === 'GET' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)\/report$/i);
@@ -151,10 +158,9 @@ function validateJob(input) {
   return { repositoryPath: input.repositoryPath, repository: input.repository, target: input.target || 'vite', executor: input.executor || 'docker', maxRepairAttempts: Math.min(Number(input.maxRepairAttempts) || 1, 3) };
 }
 
-function scope(principal) { return principal.role === 'admin' ? undefined : principal.accountId; }
-function requireAdmin(principal) { if (principal.role !== 'admin') { const error = new Error('Administrator access is required.'); error.statusCode = 403; throw error; } }
+function scope(principal) { return principal.role === 'platform-admin' ? undefined : principal.accountId; }
 function audit(context, principal, action, resourceType, resourceId, metadata) { return context.auditLog.record({ accountId: principal.accountId, actorId: principal.credentialId || principal.role, action, resourceType, resourceId, metadata }); }
-async function ownedJob(store, id, principal) { const job = await store.get(id); return job && (principal.role === 'admin' || job.accountId === principal.accountId) ? job : null; }
+async function ownedJob(store, id, principal) { const job = await store.get(id); return job && (principal.role === 'platform-admin' || job.accountId === principal.accountId) ? job : null; }
 async function body(request) { return JSON.parse(await rawBody(request)); }
 async function rawBody(request) { const chunks = []; for await (const chunk of request) chunks.push(chunk); const value = Buffer.concat(chunks); if (value.length > 1024 * 1024) throw new Error('Payload too large.'); return value; }
 function json(response, status, value) { response.writeHead(status, { 'content-type': 'application/json' }); response.end(`${JSON.stringify(value)}\n`); }
