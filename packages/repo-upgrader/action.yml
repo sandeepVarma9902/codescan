@@ -1,0 +1,22 @@
+name: Repo Upgrader
+description: Deterministically migrate a React repository and produce verification evidence.
+inputs:
+  target:
+    description: vite, nextjs, or react-native
+    required: true
+    default: vite
+outputs:
+  report:
+    description: Path to the structured migration report.
+    value: ${{ steps.migrate.outputs.report }}
+runs:
+  using: composite
+  steps:
+    - name: Install migration engine
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: npm install --ignore-scripts
+    - name: Migrate and verify
+      id: migrate
+      shell: bash
+      run: node "$GITHUB_ACTION_PATH/scripts/action-runner.js" "$GITHUB_WORKSPACE" "${{ inputs.target }}"

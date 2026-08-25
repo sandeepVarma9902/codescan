@@ -368,6 +368,10 @@ repo-upgrader remote usage
 
 Version 3.0 recognizes conventional CRA service-worker registration and replaces it with `vite-plugin-pwa` auto-update registration while retaining ambiguous custom workers for manual review. The existing gated Next.js compatibility bridge and Expo Router conversion remain conservative: unsupported browser behavior and interactive DOM semantics stop automatic mutation instead of creating deceptively broken output.
 
+### Free GitHub Actions migration
+
+The public demo serves a ready-to-use workflow at `/github-actions.yml`. Save it as `.github/workflows/repo-upgrader.yml` in the React repository, enable GitHub Actions to create pull requests under **Settings → Actions → General → Workflow permissions**, then run **Repo Upgrader** from the Actions tab and select `vite`, `nextjs`, or `react-native`. GitHub performs the scan, checkpoint, deterministic transformation, dependency installation, build/test/lint verification, and opens a feature-branch PR containing both the migrated code and `repo-upgrader-report.json`. No repository token is sent to the demo service.
+
 Run `npm run benchmark` to exercise a deterministic 100-component CRA fixture with a five-second scan, plan, and transform budget. Tagged releases named `repo-upgrader-v*` run tests, lint, build, benchmark, and package inspection; then publish npm provenance when `NPM_TOKEN` is configured and an immutable container to GitHub Container Registry. See `SECURITY.md` for disclosure and release requirements. Creating a version tag is intentionally a maintainer action because it publishes external artifacts.
 
 ## Security note
