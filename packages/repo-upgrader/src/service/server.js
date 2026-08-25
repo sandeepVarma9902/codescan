@@ -23,6 +23,7 @@ import { createBillingPortal, githubInstallUrl, requirePermission } from './comm
 
 const DASHBOARD_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../dashboard');
 const OPENAPI_FILE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../openapi.json');
+const ACTION_WORKFLOW_FILE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../templates/repo-upgrader.yml');
 
 export async function startService(options = {}) {
   const demoMode = options.demoMode ?? process.env.MODERNIZER_DEMO_MODE === 'true';
@@ -62,6 +63,7 @@ async function route(request, response, context) {
     if (request.method === 'GET' && request.url === '/dashboard/app.js') return asset(response, 'app.js', 'text/javascript; charset=utf-8');
     if (request.method === 'GET' && request.url === '/dashboard/styles.css') return asset(response, 'styles.css', 'text/css; charset=utf-8');
     if (request.method === 'GET' && request.url === '/openapi.json') { const value=await fs.readFile(OPENAPI_FILE);response.writeHead(200,{'content-type':'application/json','cache-control':'public, max-age=300'});return response.end(value); }
+    if (request.method === 'GET' && request.url === '/github-actions.yml') { const value = await fs.readFile(ACTION_WORKFLOW_FILE); response.writeHead(200, { 'content-type': 'text/yaml; charset=utf-8', 'content-disposition': 'attachment; filename="repo-upgrader.yml"', 'x-content-type-options': 'nosniff' }); return response.end(value); }
     if (request.method === 'GET' && request.url === '/v1/demo-config') return json(response, 200, { enabled: context.demoMode, notice: context.demoMode ? 'Public preview: remote repositories are not cloned or executed.' : null });
     if (request.method === 'GET' && request.url === '/readyz') {
       const worker = typeof context.worker.status === 'function' ? context.worker.status() : { accepting: true };
