@@ -19,7 +19,7 @@ The first production path is **Create React App → Vite**. The **React → Next
 - Optionally verifies inside a resource-limited Docker container with no network access after dependency installation.
 - Supports up to three deterministic repair attempts and records every recipe and verification run in the report.
 - Inventories React Router paths, proposes App Router destinations, detects client-only boundaries and SSR hazards, classifies data fetching, and scores React → Next.js readiness.
-- Analyzes React → React Native conversion, maps DOM elements to native primitives, proposes Expo Router destinations, and blocks unsafe browser/platform assumptions.
+- Analyzes React → React Native conversion, maps DOM elements to native primitives, proposes Expo Router destinations, and attaches reviewable native recipes to browser/platform assumptions.
 
 ## Requirements
 
@@ -70,7 +70,7 @@ repo-upgrader migrate \
 
 The bridge upgrades to Next.js 16, React 19.2, and Node.js 20.9+, creates the root App Router layout, and hosts the existing SPA under a client-rendered optional catch-all route. This preserves behavior as an intermediate migration state. Medium, low, and blocked projects remain gated unless an operator reviews the findings and deliberately passes `--force`.
 
-## React to React Native roadmap
+## React to React Native conversion
 
 React → React Native is an explicit product target using Expo and Expo Router, which aligns with current React Native guidance to use a framework for new applications. Generate the conversion analysis with:
 
@@ -81,9 +81,9 @@ repo-upgrader plan \
   --out react-native-readiness.json
 ```
 
-The analyzer inventories DOM elements and suggests primitives such as `div → View`, `p → Text`, `button → Pressable`, `input → TextInput`, and `img → Image`. It maps web paths to Expo Router files, identifies components for conversion, flags CSS and desktop interactions, and blocks browser APIs, unsupported DOM elements, and web-only dependencies.
+The analyzer inventories DOM elements and suggests primitives such as `div → View`, `p → Text`, `button → Pressable`, `input → TextInput`, and `img → Image`. It maps web paths to Expo Router files, identifies components for conversion, and selects native recipes for CSS, pointer interactions, storage, files, navigation, authentication, location, notifications, maps, charts, media, React Router, Material UI, Ant Design, and unknown components.
 
-Version 1.0 enables conversion only when the analyzer finds safe structural and text components with no blockers or conversion warnings. It creates an Expo SDK 57 and Expo Router workspace, targets React Native 0.86 and React 19.2.3, converts supported JSX primitives into a parallel `native-src` tree, preserves reusable logic and relative imports, creates native routes, and verifies bundle export for Android, iOS, and web.
+Selecting the React Native target approves the recommended recipe set. The migration creates an Expo SDK 57 and Expo Router workspace, targets React Native 0.86 and React 19.2.3, converts common JSX into a parallel `native-src` tree, generates NativeWind and platform-adapter foundations, installs selected Expo/native dependencies, creates native routes, and writes every decision to `migration-decisions.json` before verifying Android, iOS, and web export.
 
 ```bash
 repo-upgrader migrate \
@@ -93,7 +93,7 @@ repo-upgrader migrate \
   --rollback-on-failure
 ```
 
-Interactive elements, forms, media, browser APIs, CSS-dependent components, React Router, unmapped DOM elements, and web-only UI libraries remain hard-gated for later behavior-aware recipes. `--force` does not bypass React Native conversion eligibility.
+Common web features are recommendations rather than hard stops. If verification fails, the GitHub Actions path still opens a reviewable PR containing the partial conversion, TODO decisions, and structured evidence. A hard failure is reserved for cases where the transformation itself cannot preserve a usable project boundary; credentials, app-store signing, proprietary SDK configuration, and product-specific UX decisions remain explicit follow-up work.
 
 Run the migration and automatically restore the original files if verification fails:
 
