@@ -339,6 +339,35 @@ Queued jobs resume after a service restart. Jobs that were running during a cras
 4. Expand the sandbox policy with read-only source mounts, disposable workspaces, and organization-specific egress rules.
 5. Add a hosted API/worker model, GitHub App, billing, organization policies, and migration analytics.
 
+## Production platform
+
+Version 2.1 supports PostgreSQL job persistence and Redis-backed distributed execution when `DATABASE_URL` and `REDIS_URL` are configured. PostgreSQL creates indexed tenant, delivery, and idempotency records and recovers interrupted jobs safely. Redis uses pending and processing lists plus visibility leases, acknowledgements, bounded retries, and expired-lease recovery so multiple workers can share work without relying on process memory. Set `MODERNIZER_REPORT_BUCKET` (and optionally `S3_ENDPOINT`) to move full verification reports into encrypted S3-compatible object storage while PostgreSQL retains a compact reference and summary. `/metrics` exposes Prometheus job and worker gauges. The Compose example includes persistent PostgreSQL and append-only Redis services with health checks; local JSON and in-process queues remain the zero-infrastructure development fallback.
+
+## Commercial customer experience
+
+Version 2.2 adds tenant roles, GitHub App onboarding, Stripe customer-portal handoff, a published OpenAPI contract, a JavaScript SDK, and hosted CLI commands. Roles follow least privilege: viewers inspect results, operators submit and cancel migrations, admins manage credentials and integrations, owners additionally manage billing, and the bootstrap platform administrator can support all tenants. Tenant admins remain scoped to their own account.
+
+Configure `GITHUB_APP_SLUG`, `MODERNIZER_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY`, and `MODERNIZER_DASHBOARD_URL`. An admin can call `GET /v1/integrations/github` for a short-lived, account-bound GitHub installation URL. An owner can call `POST /v1/billing/portal` to open Stripe's hosted portal when the billing webhook has associated a customer with the account. These endpoints create secure handoffs; they do not require payment or GitHub credentials in the browser.
+
+The machine-readable API contract is available without authentication at `/openapi.json`. The package also exports `RepoUpgraderClient` from `sdk/index.js`:
+
+```js
+import { RepoUpgraderClient } from 'repo-upgrader/sdk/index.js';
+
+const client = new RepoUpgraderClient({ baseUrl: process.env.REPO_UPGRADER_API_URL, apiKey: process.env.REPO_UPGRADER_API_KEY });
+const job = await client.submit({ repository: { fullName: 'owner/repository' }, target: 'vite' });
+```
+
+The same hosted workflow is available from the CLI:
+
+```bash
+export REPO_UPGRADER_API_URL='https://upgrader.example.com'
+export REPO_UPGRADER_API_KEY='ru_live_...'
+repo-upgrader remote submit --github-repo owner/repository --target vite
+repo-upgrader remote jobs
+repo-upgrader remote usage
+```
+
 ## Security note
 
 Verification executes package-manager scripts from the target repository. Treat repositories as untrusted and run the CLI inside an isolated container or disposable CI worker. A hosted version must enforce CPU, memory, network, filesystem, secret, and timeout policies.

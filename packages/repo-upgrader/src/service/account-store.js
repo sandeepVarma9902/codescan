@@ -23,6 +23,7 @@ export class AccountStore {
   getPlan(accountId, fallback = 'free') {
     return this.accounts.get(accountId)?.plan || fallback;
   }
+  get(accountId) { const account = this.accounts.get(accountId); return account ? structuredClone(account) : null; }
 
   hasEvent(eventId) {
     return this.events.has(eventId);

@@ -29,7 +29,7 @@ export class CredentialStore {
     return { accountId: credential.accountId, plan, role: credential.role, entitlements: PLANS[plan], credentialId: credential.id };
   }
 
-  async create({ accountId, plan = 'free', role = 'member', name = 'API key' }) {
+  async create({ accountId, plan = 'free', role = 'operator', name = 'API key' }) {
     validate({ accountId, plan, role, name });
     const secret = `ru_live_${randomBytes(24).toString('base64url')}`;
     const now = new Date().toISOString();
@@ -75,7 +75,7 @@ export class CompositeAuth {
 function validate(value) {
   if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(value.accountId || '')) throw new Error('A valid accountId is required.');
   if (!PLANS[value.plan]) throw new Error(`Unknown plan: ${value.plan}`);
-  if (!['admin', 'member'].includes(value.role)) throw new Error('role must be admin or member.');
+  if (!['owner', 'admin', 'operator', 'viewer', 'member'].includes(value.role)) throw new Error('role must be owner, admin, operator, or viewer.');
   if (typeof value.name !== 'string' || value.name.length < 1 || value.name.length > 80) throw new Error('name must contain 1 to 80 characters.');
 }
 function digest(value) { return createHash('sha256').update(value).digest('hex'); }
