@@ -20,6 +20,7 @@ import { DistributedWorker } from './distributed-worker.js';
 import { prometheusMetrics } from './metrics.js';
 import { createObjectReportStore } from './report-store.js';
 import { createBillingPortal, githubInstallUrl, requirePermission } from './commercial.js';
+import { migrateUploadedZip } from './upload-migration.js';
 
 const DASHBOARD_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../dashboard');
 const OPENAPI_FILE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../openapi.json');
@@ -75,6 +76,14 @@ async function route(request, response, context) {
     if (request.method === 'POST' && request.url === '/webhooks/billing') return billingWebhook(request, response, context);
     const principal = context.auth.authenticate(request.headers.authorization);
     if (!principal) return json(response, 401, { error: 'unauthorized' });
+    if (request.method === 'POST' && request.url?.startsWith('/v1/upload-migrations')) {
+      requirePermission(principal, 'submit');
+      if (request.headers['content-type'] !== 'application/zip') throw Object.assign(new Error('Content-Type must be application/zip.'), { statusCode: 415 });
+      const url = new URL(request.url, 'http://service');
+      const result = await migrateUploadedZip(await rawBody(request, 10 * 1024 * 1024), url.searchParams.get('target') || 'vite');
+      response.writeHead(200, { 'content-type': 'application/zip', 'content-disposition': `attachment; filename="${result.filename}"`, 'content-length': result.buffer.length, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-repo-upgrader-status': result.report.status });
+      return response.end(result.buffer);
+    }
     if (request.method === 'GET' && request.url === '/v1/integrations/github') { requirePermission(principal,'integrations'); const installUrl=githubInstallUrl({slug:context.githubAppSlug,accountId:principal.accountId,secret:context.webhookSecret}); return installUrl?json(response,200,{installUrl}):json(response,503,{error:'github_app_not_configured'}); }
     if (request.method === 'POST' && request.url === '/v1/billing/portal') { requirePermission(principal,'billing'); const account=context.accountStore.get(principal.accountId); const result=await createBillingPortal({secretKey:context.stripeSecretKey,customerId:account?.customerId,returnUrl:context.dashboardUrl||'http://127.0.0.1:8787/dashboard'}); return json(response,200,result); }
     if (request.method === 'POST' && request.url === '/v1/api-keys') {
@@ -169,7 +178,7 @@ function scope(principal) { return principal.role === 'platform-admin' ? undefin
 function audit(context, principal, action, resourceType, resourceId, metadata) { return context.auditLog.record({ accountId: principal.accountId, actorId: principal.credentialId || principal.role, action, resourceType, resourceId, metadata }); }
 async function ownedJob(store, id, principal) { const job = await store.get(id); return job && (principal.role === 'platform-admin' || job.accountId === principal.accountId) ? job : null; }
 async function body(request) { return JSON.parse(await rawBody(request)); }
-async function rawBody(request) { const chunks = []; let size = 0; for await (const chunk of request) { size += chunk.length; if (size > 1024 * 1024) { const error = new Error('Payload too large.'); error.statusCode = 413; throw error; } chunks.push(chunk); } return Buffer.concat(chunks); }
+async function rawBody(request, limit = 1024 * 1024) { const chunks = []; let size = 0; for await (const chunk of request) { size += chunk.length; if (size > limit) { const error = new Error('Payload too large.'); error.statusCode = 413; throw error; } chunks.push(chunk); } return Buffer.concat(chunks); }
 function json(response, status, value) { response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); response.end(`${JSON.stringify(value)}\n`); }
 async function asset(response, file, contentType) { const value = await fs.readFile(path.join(DASHBOARD_ROOT, file)); response.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); response.end(value); }
 
