@@ -15,7 +15,7 @@ runs:
     - name: Install migration engine
       shell: bash
       working-directory: ${{ github.action_path }}
-      run: npm install --ignore-scripts
+      run: npm ci --ignore-scripts --workspaces=false
     - name: Migrate and verify
       id: migrate
       shell: bash
