@@ -24,7 +24,7 @@ jobs:
           registry-url: https://registry.npmjs.org
           cache: npm
           cache-dependency-path: packages/repo-upgrader/package-lock.json
-      - run: npm install
+      - run: npm ci --workspaces=false
       - run: npm test
       - run: npm run lint
       - run: npm run build
