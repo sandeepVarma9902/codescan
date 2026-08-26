@@ -31,6 +31,17 @@
         <p>Download the workflow, add it to your repository as <code>.github/workflows/repo-upgrader.yml</code>, then choose <strong>Repo Upgrader</strong> under the repository’s Actions tab. The migration runs in GitHub and opens a pull request containing the converted code and report.</p>
         <a class="link" href="/github-actions.yml" download>Download GitHub Actions workflow</a>
       </section>
+      <section class="card">
+        <p class="eyebrow">Upload a project</p>
+        <h2>Download a migrated ZIP</h2>
+        <p>Upload one React project as a ZIP. The demo scans and transforms it without executing dependencies or project scripts, then returns the complete migrated project and report.</p>
+        <form id="upload-form">
+          <label>React project ZIP<input id="project-zip" type="file" accept=".zip,application/zip" required></label>
+          <label>Modernization target<select id="upload-target"><option value="vite">CRA → Vite</option><option value="nextjs">React → Next.js</option><option value="react-native">React → React Native</option></select></label>
+          <button>Convert and download ZIP</button>
+        </form>
+        <p id="upload-message" class="message" role="status"></p>
+      </section>
       <section class="grid">
         <article class="card launch">
           <p class="eyebrow">New migration</p><h2>Choose the destination</h2>

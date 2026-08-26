@@ -10,7 +10,7 @@ COPY --chown=node:node src ./src
 COPY --chown=node:node scripts ./scripts
 COPY --chown=node:node dashboard ./dashboard
 
-RUN npm install --omit=dev --ignore-scripts && npm cache clean --force
+RUN npm ci --workspaces=false --omit=dev --ignore-scripts && npm cache clean --force
 
 RUN mkdir -p /data /work && chown node:node /data /work
 USER node

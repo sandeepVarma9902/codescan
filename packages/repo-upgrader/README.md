@@ -370,7 +370,11 @@ Version 3.0 recognizes conventional CRA service-worker registration and replaces
 
 ### Free GitHub Actions migration
 
-The public demo serves a ready-to-use workflow at `/github-actions.yml`. Save it as `.github/workflows/repo-upgrader.yml` in the React repository, enable GitHub Actions to create pull requests under **Settings → Actions → General → Workflow permissions**, then run **Repo Upgrader** from the Actions tab and select `vite`, `nextjs`, or `react-native`. GitHub performs the scan, checkpoint, deterministic transformation, dependency installation, build/test/lint verification, and opens a feature-branch PR containing both the migrated code and `repo-upgrader-report.json`. No repository token is sent to the demo service.
+The public demo serves a ready-to-use workflow at `/github-actions.yml`. Save it as `.github/workflows/repo-upgrader.yml` in the React repository, enable GitHub Actions to create pull requests under **Settings → Actions → General → Workflow permissions**, then run **Repo Upgrader** from the Actions tab and select `vite`, `nextjs`, or `react-native`. Choose `pull-request` to commit the migration to a feature branch and open a PR, or `download-zip` to keep the repository unchanged and receive the complete migrated project as a seven-day GitHub Actions artifact. GitHub performs the scan, checkpoint, deterministic transformation, dependency installation, and build/test/lint verification. No repository token is sent to the demo service.
+
+### Uploaded project migration
+
+The dashboard also accepts a single React project ZIP up to 10 MB compressed, 50 MB uncompressed, and 2,000 files. The public service validates every archive path, extracts into a disposable workspace, scans and transforms without installing dependencies or executing project scripts, embeds `repo-upgrader-report.json`, returns a migrated ZIP, and deletes the workspace. This is intentionally marked `transformed-unverified`; run the included project locally or use the GitHub Actions path for full build, test, and lint verification.
 
 Run `npm run benchmark` to exercise a deterministic 100-component CRA fixture with a five-second scan, plan, and transform budget. Tagged releases named `repo-upgrader-v*` run tests, lint, build, benchmark, and package inspection; then publish npm provenance when `NPM_TOKEN` is configured and an immutable container to GitHub Container Registry. See `SECURITY.md` for disclosure and release requirements. Creating a version tag is intentionally a maintainer action because it publishes external artifacts.
 

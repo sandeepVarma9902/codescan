@@ -12,6 +12,14 @@ on:
           - vite
           - nextjs
           - react-native
+      delivery:
+        description: Deliver converted code as a pull request or downloadable ZIP
+        required: true
+        default: pull-request
+        type: choice
+        options:
+          - pull-request
+          - download-zip
 
 permissions:
   contents: write
@@ -27,6 +35,7 @@ jobs:
         with:
           target: ${{ inputs.target }}
       - name: Open migration pull request
+        if: ${{ inputs.delivery == 'pull-request' }}
         uses: peter-evans/create-pull-request@v7
         with:
           branch: repo-upgrader/${{ inputs.target }}-${{ github.run_id }}
@@ -37,3 +46,13 @@ jobs:
 
             Review `repo-upgrader-report.json` for the scan, plan, changes, and verification evidence.
           delete-branch: true
+      - name: Package migrated project
+        if: ${{ inputs.delivery == 'download-zip' }}
+        run: zip -qr "migrated-${{ inputs.target }}.zip" . -x '.git/*' 'node_modules/*' '.modernizer/*'
+      - name: Provide migrated ZIP
+        if: ${{ inputs.delivery == 'download-zip' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: migrated-${{ inputs.target }}-${{ github.run_id }}
+          path: migrated-${{ inputs.target }}.zip
+          retention-days: 7
