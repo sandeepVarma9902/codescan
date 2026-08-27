@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { exists, readJson, walk, writeJson } from './utils.js';
 
-const TAGS = { div: 'View', section: 'View', main: 'View', header: 'View', footer: 'View', nav: 'View', form: 'View', ul: 'View', ol: 'View', span: 'Text', p: 'Text', h1: 'Text', h2: 'Text', h3: 'Text', h4: 'Text', label: 'Text', strong: 'Text', em: 'Text', li: 'Text', button: 'Pressable', input: 'TextInput', textarea: 'TextInput', img: 'Image' };
+const TAGS = { div: 'View', section: 'View', main: 'View', header: 'View', footer: 'View', nav: 'View', form: 'View', aside: 'View', article: 'View', ul: 'View', ol: 'View', span: 'Text', small: 'Text', p: 'Text', h1: 'Text', h2: 'Text', h3: 'Text', h4: 'Text', label: 'Text', strong: 'Text', em: 'Text', li: 'Text', i: 'Text', button: 'Pressable', input: 'TextInput', textarea: 'TextInput', img: 'Image' };
 const RECIPE_PACKAGES = {
   'native-primitives': { '@react-native-picker/picker': '^2.11.0' }, 'nativewind-styling': { nativewind: '^4.2.0' }, 'async-storage': { '@react-native-async-storage/async-storage': '^2.2.0' }, 'gesture-handler': { 'react-native-gesture-handler': '^2.28.0', 'react-native-reanimated': '^4.1.0' }, 'expo-document-picker': { 'expo-document-picker': '~14.0.0', 'expo-file-system': '~19.0.0' }, 'expo-image': { 'expo-image': '~3.0.0', 'react-native-svg': '^15.12.0' }, 'expo-location': { 'expo-location': '~19.0.0' }, 'expo-notifications': { 'expo-notifications': '~0.32.0' }, 'expo-auth-session': { 'expo-auth-session': '~7.0.0', 'expo-secure-store': '~15.0.0' }, 'native-maps': { 'react-native-maps': '^1.20.0' }, 'native-charts': { 'victory-native': '^41.0.0', 'react-native-svg': '^15.12.0' }, 'native-paper': { 'react-native-paper': '^5.14.0' }
 };
@@ -13,12 +13,13 @@ export async function transformReactToNative(root, { analysis } = {}) {
   pkg.main = 'expo-router/entry';
   pkg.scripts = { start: 'expo start', android: 'expo start --android', ios: 'expo start --ios', web: 'expo start --web', build: 'expo export --platform all --output-dir dist-expo' };
   pkg.dependencies = cleanDependencies(pkg.dependencies || {});
-  Object.assign(pkg.dependencies, { expo: '~57.0.0', 'expo-constants': '~57.0.0', 'expo-linking': '~57.0.0', 'expo-router': '~57.0.0', 'expo-status-bar': '~57.0.0', react: '19.2.3', 'react-native': '0.86.0', 'react-native-safe-area-context': '^5.6.0', 'react-native-screens': '^4.16.0', 'react-native-web': '^0.21.0' });
+  Object.assign(pkg.dependencies, { expo: '~57.0.0', 'expo-constants': '~57.0.0', 'expo-linking': '~57.0.0', 'expo-router': '~57.0.0', 'expo-status-bar': '~57.0.0', react: '19.2.3', 'react-dom': '19.2.3', 'react-native': '0.86.0', 'react-native-safe-area-context': '^5.6.0', 'react-native-screens': '^4.16.0', 'react-native-web': '^0.21.0' });
   for (const recommendation of analysis?.recommendations || []) Object.assign(pkg.dependencies, RECIPE_PACKAGES[recommendation.id] || {});
   pkg.devDependencies = cleanDependencies(pkg.devDependencies || {});
   pkg.devDependencies.typescript = pkg.devDependencies.typescript || '^5.9.0';
+  pkg.devDependencies['babel-preset-expo'] = '~57.0.0';
   if (analysis?.recommendations?.some((item) => item.id === 'nativewind-styling')) pkg.devDependencies.tailwindcss ||= '^3.4.0';
-  pkg.engines = { ...(pkg.engines || {}), node: '>=22.13.0' };
+  pkg.engines = { ...(pkg.engines || {}), node: '>=20.19.4' };
   await writeJson(path.join(root, 'package.json'), pkg);
   const changes = ['package.json'];
 
@@ -69,8 +70,7 @@ export function convertSafeJsx(content) {
   output = output
     .replace(/import\s+[^;]+?from\s+['"]react-router-dom['"]\s*;?/g, '')
     .replace(/<\/?(?:BrowserRouter|HashRouter|Routes)\b[^>]*>/g, (tag) => tag.startsWith('</') ? '</>' : '<>')
-    .replace(/<Route\b[^>]*\belement=\{/g, '<>')
-    .replace(/\}\s*\/>/g, '</>')
+    .replace(/<Route\b[^>]*\belement=\{([\s\S]*?)\}\s*\/>/g, '<>$1</>')
     .replace(/const\s+(\w+)\s*=\s*useNavigate\s*\(\s*\)\s*;?/g, 'const router = useRouter();')
     .replace(/\bnavigate\s*\(/g, 'router.push(');
   if (usesRouter) output = `import { useRouter } from 'expo-router';\n${output}`;
@@ -101,6 +101,6 @@ async function writePlatformAdapters(root, recipes, changes) {
   changes.push('native-src/platform/index.ts');
 }
 
-function cleanDependencies(dependencies) { const cleaned = { ...dependencies }; for (const name of ['react-dom', 'react-scripts', 'react-router-dom', '@mui/material', 'antd', 'next', 'vite', '@vitejs/plugin-react']) delete cleaned[name]; return cleaned; }
+function cleanDependencies(dependencies) { const cleaned = { ...dependencies }; for (const name of ['react-dom', 'react-scripts', 'react-router-dom', '@mui/material', 'antd', 'next', 'vite', '@vitejs/plugin-react', '@testing-library/jest-dom', '@testing-library/react', '@testing-library/user-event', 'web-vitals']) delete cleaned[name]; return cleaned; }
 async function findApp(root) { for (const file of ['src/App.jsx', 'src/App.js', 'src/App.tsx', 'src/App.ts']) if (await exists(path.join(root, file))) return file; throw new Error('A conventional src/App component is required for React Native conversion.'); }
 function slug(value) { return String(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'modernized-app'; }

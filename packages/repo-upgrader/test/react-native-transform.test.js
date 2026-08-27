@@ -20,6 +20,13 @@ test('converts common controls and router contracts to native equivalents', () =
   assert.doesNotMatch(converted, /react-router-dom/);
 });
 
+test('preserves self-closing control expressions and converts semantic containers', () => {
+  const converted = convertSafeJsx(`export default function App(){ return <aside><article><small>Energy</small><input value={3} onChange={event => setEnergy(event.target.value)} /></article></aside> }`);
+  assert.ok(converted.includes('<Text>Energy</Text>'));
+  assert.ok(converted.includes('onChange={event => setEnergy(event.target.value)} />'));
+  assert.doesNotMatch(converted, new RegExp('<(?:aside|article|small)'));
+});
+
 test('creates an Expo Router workspace and preserves converted source', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'repo-upgrader-expo-'));
   await fs.mkdir(path.join(root, 'src'));
@@ -32,8 +39,9 @@ test('creates an Expo Router workspace and preserves converted source', async ()
   assert.equal(pkg.main, 'expo-router/entry');
   assert.equal(pkg.dependencies.expo, '~57.0.0');
   assert.equal(pkg.dependencies['react-native'], '0.86.0');
-  assert.equal(pkg.dependencies['react-dom'], undefined);
-  assert.equal(pkg.engines.node, '>=22.13.0');
+  assert.equal(pkg.dependencies['react-dom'], '19.2.3');
+  assert.equal(pkg.devDependencies['babel-preset-expo'], '~57.0.0');
+  assert.equal(pkg.engines.node, '>=20.19.4');
   assert.match(await fs.readFile(path.join(root, 'native-src/App.tsx'), 'utf8'), /<View><Text>Hello native<\/Text><\/View>/);
   assert.match(await fs.readFile(path.join(root, 'app/_layout.tsx'), 'utf8'), /<Stack/);
   assert.match(await fs.readFile(path.join(root, '.env'), 'utf8'), /^EXPO_PUBLIC_API=/);
