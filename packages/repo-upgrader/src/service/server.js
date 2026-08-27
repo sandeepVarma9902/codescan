@@ -80,7 +80,7 @@ async function route(request, response, context) {
       requirePermission(principal, 'submit');
       if (request.headers['content-type'] !== 'application/zip') throw Object.assign(new Error('Content-Type must be application/zip.'), { statusCode: 415 });
       const url = new URL(request.url, 'http://service');
-      const result = await migrateUploadedZip(await rawBody(request, 10 * 1024 * 1024), url.searchParams.get('target') || 'vite');
+      const result = await migrateUploadedZip(await rawBody(request, 20 * 1024 * 1024), url.searchParams.get('target') || 'vite');
       response.writeHead(200, { 'content-type': 'application/zip', 'content-disposition': `attachment; filename="${result.filename}"`, 'content-length': result.buffer.length, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-repo-upgrader-status': result.report.status });
       return response.end(result.buffer);
     }
