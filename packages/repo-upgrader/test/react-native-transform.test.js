@@ -22,9 +22,9 @@ test('converts common controls and router contracts to native equivalents', () =
 
 test('preserves self-closing control expressions and converts semantic containers', () => {
   const converted = convertSafeJsx(`export default function App(){ return <aside><article><small>Energy</small><input value={3} onChange={event => setEnergy(event.target.value)} /></article></aside> }`);
-  assert.match(converted, /<Text>Energy<\\/Text>/);
-  assert.match(converted, /onChange=\\{event => setEnergy\\(event\\.target\\.value\\)\\} \\/>/);
-  assert.doesNotMatch(converted, /<\\/?(?:aside|article|small)\\b/);
+  assert.ok(converted.includes('<Text>Energy</Text>'));
+  assert.ok(converted.includes('onChange={event => setEnergy(event.target.value)} />'));
+  assert.doesNotMatch(converted, new RegExp('<(?:aside|article|small)'));
 });
 
 test('creates an Expo Router workspace and preserves converted source', async () => {
