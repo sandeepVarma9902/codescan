@@ -374,7 +374,7 @@ The public demo serves a ready-to-use workflow at `/github-actions.yml`. Save it
 
 ### Uploaded project migration
 
-The dashboard also accepts a single React project ZIP up to 10 MB compressed, 50 MB uncompressed, and 2,000 files. The public service validates every archive path, extracts into a disposable workspace, scans and transforms without installing dependencies or executing project scripts, embeds `repo-upgrader-report.json`, returns a migrated ZIP, and deletes the workspace. This is intentionally marked `transformed-unverified`; run the included project locally or use the GitHub Actions path for full build, test, and lint verification.
+The dashboard also accepts a single React project ZIP up to 20 MB compressed, 50 MB uncompressed, and 2,000 files. The public service validates every archive path, extracts into a disposable workspace, scans and transforms without installing dependencies or executing project scripts, embeds `repo-upgrader-report.json`, returns a migrated ZIP, and deletes the workspace. This is intentionally marked `transformed-unverified`; run the included project locally or use the GitHub Actions path for full build, test, and lint verification.
 
 Run `npm run benchmark` to exercise a deterministic 100-component CRA fixture with a five-second scan, plan, and transform budget. Tagged releases named `repo-upgrader-v*` run tests, lint, build, benchmark, and package inspection; then publish npm provenance when `NPM_TOKEN` is configured and an immutable container to GitHub Container Registry. See `SECURITY.md` for disclosure and release requirements. Creating a version tag is intentionally a maintainer action because it publishes external artifacts.
 
