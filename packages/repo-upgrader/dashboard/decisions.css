@@ -1,0 +1,23 @@
+.metrics { grid-template-columns: repeat(5, 1fr); }
+.attention { background: #fff7df !important; color: #805d00 !important; }
+.badge.awaiting-decision { background: #fff1c2; color: #765700; }
+.decision-panel { margin: 22px 0; padding: 18px; border: 1px solid #eed68c; border-radius: 16px; background: #fffaf0; }
+.decision-intro { display: flex; gap: 12px; align-items: flex-start; }
+.decision-intro h3 { margin: 0 0 4px; }
+.decision-intro p { margin: 0; }
+.decision-icon { display: grid; place-items: center; flex: 0 0 30px; height: 30px; border-radius: 50%; background: #f2ca55; color: #624700; font-weight: 900; }
+.blocker { border: 0; border-top: 1px solid #eadfbf; margin: 20px 0 0; padding: 20px 0 0; }
+.blocker legend { padding: 0; font-weight: 800; }
+.blocker > p { margin: 7px 0 12px; }
+.dependency { display: flex; justify-content: space-between; gap: 12px; padding: 9px 11px; border-radius: 9px; background: #fff; margin-bottom: 10px; font-size: 12px; }
+.choice { display: flex; gap: 10px; padding: 12px; margin-top: 8px; border: 1px solid #e0dfd7; border-radius: 12px; background: #fff; cursor: pointer; }
+.choice:has(input:checked) { border-color: #3b805c; box-shadow: 0 0 0 2px #3b805c1f; }
+.choice input { width: auto; margin-top: 3px; }
+.choice span, .choice small, .choice em { display: block; }
+.choice small { color: #637068; margin: 4px 0; }
+.choice em { font-size: 11px; color: #7b6750; font-style: normal; }
+.instructions { display: grid; gap: 6px; margin-top: 12px; font-size: 12px; font-weight: 700; }
+.instructions textarea { min-height: 70px; resize: vertical; border: 1px solid #ccd3cd; border-radius: 10px; padding: 10px; font: inherit; }
+.decision-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+@media (max-width: 900px) { .metrics { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 480px) { .decision-actions { align-items: stretch; flex-direction: column; } }
