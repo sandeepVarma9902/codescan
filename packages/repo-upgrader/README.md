@@ -278,6 +278,19 @@ Version 1.8 includes a responsive, dependency-free control panel at `/dashboard`
 
 Version 1.9 adds live five-second refresh while migrations are active, a lifecycle timeline, safe cancellation for queued work, direct links to generated pull requests, failure details, and downloadable JSON verification reports. Reports are also available from `GET /v1/jobs/:id/report`; the endpoint returns `409` until evidence exists and preserves the same tenant ownership rules as job lookup.
 
+### Blocker decisions and safe continuation
+
+Migration jobs no longer have to fail just because a source library has no direct equivalent. Before local execution, the service detects catalogued incompatibilities and moves the job to `awaiting-decision`. The dashboard explains the affected library, ranks a recommended replacement and alternatives, shows risk and automation support, and offers compatibility, skip, or custom-instruction paths where appropriate.
+
+Users can approve every recommended option in one action or select each resolution independently. `POST /v1/jobs/:id/decisions` validates that every blocker was resolved, records the actor, timestamp, selection, and optional instructions, then safely re-queues the same job. Resolutions are included in the migration report and audit trail. Outbound webhooks include `migration.awaiting-decision` and `migration.resumed` so external systems can request approval without polling.
+
+```bash
+curl -X POST http://127.0.0.1:8787/v1/jobs/JOB_ID/decisions \
+  -H 'Authorization: Bearer ru_live_...' \
+  -H 'Content-Type: application/json' \
+  -d '{"mode":"recommended"}'
+```
+
 ### CRA compatibility recipes
 
 Version 2.0 deepens the deterministic CRA → Vite pack. The scanner inventories TypeScript/JavaScript `paths`, CRA `ReactComponent` SVG imports, and conventional `setupProxy.js` routes. The transformer preserves aliases through `vite-tsconfig-paths`, converts SVG imports to `vite-plugin-svgr`'s `?react` contract, and translates recognized proxy routes into Vite `server.proxy` entries while retaining the source proxy file as migration evidence. Unrecognized proxy middleware and service-worker behavior remain visible for manual review rather than being silently discarded.

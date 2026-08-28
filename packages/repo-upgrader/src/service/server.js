@@ -21,6 +21,7 @@ import { prometheusMetrics } from './metrics.js';
 import { createObjectReportStore } from './report-store.js';
 import { createBillingPortal, githubInstallUrl, requirePermission } from './commercial.js';
 import { migrateUploadedZip } from './upload-migration.js';
+import { recommendedResolutions, resolveBlockers } from './blocker-decisions.js';
 
 const DASHBOARD_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../dashboard');
 const OPENAPI_FILE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../openapi.json');
@@ -59,10 +60,11 @@ export async function startService(options = {}) {
 
 async function route(request, response, context) {
   try {
-    if (request.method === 'GET' && request.url === '/healthz') return json(response, 200, { status: 'ok', service: 'repo-upgrader', version: '3.0.0' });
+    if (request.method === 'GET' && request.url === '/healthz') return json(response, 200, { status: 'ok', service: 'repo-upgrader', version: '3.1.0' });
     if (request.method === 'GET' && ['/dashboard', '/dashboard/'].includes(request.url)) return asset(response, 'index.html', 'text/html; charset=utf-8');
     if (request.method === 'GET' && request.url === '/dashboard/app.js') return asset(response, 'app.js', 'text/javascript; charset=utf-8');
     if (request.method === 'GET' && request.url === '/dashboard/styles.css') return asset(response, 'styles.css', 'text/css; charset=utf-8');
+    if (request.method === 'GET' && request.url === '/dashboard/decisions.css') return asset(response, 'decisions.css', 'text/css; charset=utf-8');
     if (request.method === 'GET' && request.url === '/openapi.json') { const value=await fs.readFile(OPENAPI_FILE);response.writeHead(200,{'content-type':'application/json','cache-control':'public, max-age=300'});return response.end(value); }
     if (request.method === 'GET' && request.url === '/github-actions.yml') { const value = await fs.readFile(ACTION_WORKFLOW_FILE); response.writeHead(200, { 'content-type': 'text/yaml; charset=utf-8', 'content-disposition': 'attachment; filename="repo-upgrader.yml"', 'x-content-type-options': 'nosniff' }); return response.end(value); }
     if (request.method === 'GET' && request.url === '/v1/demo-config') return json(response, 200, { enabled: context.demoMode, notice: context.demoMode ? 'Public preview: remote repositories are not cloned or executed.' : null });
@@ -134,6 +136,21 @@ async function route(request, response, context) {
     if (request.method === 'GET' && request.url === '/v1/analytics') return json(response, 200, await context.store.analytics(scope(principal)));
     const cancel = request.method === 'DELETE' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)$/i);
     if (cancel) { requirePermission(principal, 'cancel'); const existing = await ownedJob(context.store, cancel[1], principal); if (!existing) return json(response, 404, { error: 'not_found' }); const cancelled = await context.store.cancel(cancel[1]); await audit(context, principal, 'migration.cancelled', 'job', cancelled.id, { target: cancelled.target }); await context.webhooks.dispatch('migration.cancelled', cancelled); return json(response, 200, cancelled); }
+    const decisions = request.method === 'POST' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)\/decisions$/i);
+    if (decisions) {
+      requirePermission(principal, 'submit');
+      const job = await ownedJob(context.store, decisions[1], principal);
+      if (!job) return json(response, 404, { error: 'not_found' });
+      if (job.status !== 'awaiting-decision') return json(response, 409, { error: 'job_not_awaiting_decision' });
+      const input = await body(request);
+      const requested = input.mode === 'recommended' ? recommendedResolutions(job.blockers) : input.resolutions;
+      const resolved = resolveBlockers(job.blockers, requested, principal.credentialId || principal.role);
+      const resumed = await context.store.update(job.id, { ...resolved, decisionsApprovedAt: new Date().toISOString(), status: 'queued', message: 'Decisions approved. Migration resumed.' });
+      await audit(context, principal, 'migration.decisions-approved', 'job', job.id, { decisions: resolved.decisions.map(({ blockerId, optionId }) => ({ blockerId, optionId })) });
+      await context.webhooks.dispatch('migration.resumed', resumed);
+      await context.worker.enqueue(resumed);
+      return json(response, 202, resumed);
+    }
     const match = request.method === 'GET' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)$/i);
     if (match) { const job = await ownedJob(context.store, match[1], principal); return job ? json(response, 200, job) : json(response, 404, { error: 'not_found' }); }
     const report = request.method === 'GET' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)\/report$/i);

@@ -14,7 +14,7 @@ test('health and readiness endpoints expose service and worker state', async () 
   const service = await startService({ token: 'test-token', port: 0, store, worker });
   const base = `http://127.0.0.1:${service.address.port}`;
   const health = await (await fetch(`${base}/healthz`)).json();
-  assert.deepEqual(health, { status: 'ok', service: 'repo-upgrader', version: '3.0.0' });
+  assert.deepEqual(health, { status: 'ok', service: 'repo-upgrader', version: '3.1.0' });
   const readiness = await (await fetch(`${base}/readyz`)).json();
   assert.equal(readiness.status, 'ready');
   assert.equal(readiness.worker.queued, 2);

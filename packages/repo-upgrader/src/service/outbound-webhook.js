@@ -1,6 +1,6 @@
 import { createHmac, randomUUID } from 'node:crypto';
 
-const EVENTS = new Set(['migration.queued', 'migration.running', 'migration.succeeded', 'migration.failed', 'migration.cancelled']);
+const EVENTS = new Set(['migration.queued', 'migration.awaiting-decision', 'migration.resumed', 'migration.running', 'migration.succeeded', 'migration.failed', 'migration.cancelled']);
 
 export class WebhookDispatcher {
   constructor({ endpoints = [], transport = fetch, auditLog, attempts = 3, retryDelayMs = 250 } = {}) {
