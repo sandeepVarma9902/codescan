@@ -179,8 +179,8 @@ For multi-tenant deployments, configure account-scoped API keys instead of the l
 
 ```bash
 export MODERNIZER_API_KEYS_JSON='[
-  {"key":"rk_customer_a_long_random_value","accountId":"customer-a","plan":"starter"},
-  {"key":"rk_customer_b_long_random_value","accountId":"customer-b","plan":"pro"}
+  {"key":"rk_customer_a_long_random_value","accountId":"customer-a","plan":"team"},
+  {"key":"rk_customer_b_long_random_value","accountId":"customer-b","plan":"business"}
 ]'
 ```
 
@@ -188,14 +188,15 @@ Keys are SHA-256 digested in memory after startup and are never persisted with j
 
 Built-in entitlements provide a vendor-neutral billing boundary:
 
-| Plan | Monthly migrations | Targets |
-|---|---:|---|
-| Free | 3 | CRA → Vite |
-| Starter | 25 | CRA → Vite, React → Next.js |
-| Pro | 100 | All targets including React Native |
-| Enterprise | Unlimited | All targets |
+| Plan | Price | Included migrations | Targets |
+|---|---:|---:|---|
+| Unpaid | $0 | 0 | Repository connection and billing only |
+| Single | $10 once | 1 prepaid credit | All targets |
+| Team | $50/month | 50/month | All targets |
+| Business | $80/month | 200/month | All targets |
+| Enterprise | Custom | Custom | All targets |
 
-Quota enforcement occurs after idempotency lookup, so a retried request returns its original job without consuming another unit. A future Stripe/Paddle adapter can update account-plan assignments without changing migration execution or tenant isolation.
+Quota enforcement occurs after idempotency lookup, so a retried request returns its original job without consuming another unit. Single migrations use an idempotent credit ledger; Team and Business use monthly quotas.
 
 ### Billing lifecycle
 
@@ -205,7 +206,7 @@ Version 1.2 adds a provider-neutral subscription webhook compatible with Stripe-
 export MODERNIZER_BILLING_WEBHOOK_SECRET='whsec_replace_me'
 ```
 
-The webhook accepts `customer.subscription.created`, `customer.subscription.updated`, and `customer.subscription.deleted`. Subscription metadata must contain `accountId` and `plan` (`free`, `starter`, `pro`, or `enterprise`). Signatures cover the exact request body and timestamp, expire after five minutes, and are compared in constant time. Applied event IDs are persisted for replay protection. Active subscription plans immediately override the API key's configured fallback plan; cancellation or an inactive subscription safely returns the account to Free.
+The webhook accepts `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, and `customer.subscription.deleted`. Paid single-migration Checkout events add one durable credit. Subscription metadata must contain `accountId` and plan (`team`, `business`, or `enterprise`). Signatures cover the exact request body and timestamp, expire after five minutes, and are compared in constant time. Applied event IDs are persisted for replay protection. Cancellation or an inactive subscription returns the account to Unpaid.
 
 ### Organization policies and analytics
 
@@ -233,7 +234,7 @@ Version 1.4 removes the operational dependency on environment-only customer cred
 curl -X POST http://127.0.0.1:8787/v1/api-keys \
   -H "Authorization: Bearer $MODERNIZER_API_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"accountId":"customer-a","plan":"starter","role":"member","name":"Production CI"}'
+  -d '{"accountId":"customer-a","plan":"team","role":"member","name":"Production CI"}'
 ```
 
 The complete `ru_live_...` secret is returned only by the creation response. Only its SHA-256 digest and a short display prefix are persisted. Generated keys contain 192 bits of randomness, revocation takes effect immediately, and list responses never expose credential digests. Environment-configured keys remain available as bootstrap or break-glass credentials.
@@ -277,6 +278,36 @@ docker compose -f compose.example.yml up -d
 Version 1.8 includes a responsive, dependency-free control panel at `/dashboard`. Customers connect with a managed API key stored only for the browser session, see monthly usage, plan, success rate, and migration totals, inspect recent job states, and launch CRA → Vite, React → Next.js, or React → React Native migrations. The UI is served by the same process and calls the tenant-isolated API, so it requires no separate frontend deployment or cross-origin credential configuration.
 
 Version 1.9 adds live five-second refresh while migrations are active, a lifecycle timeline, safe cancellation for queued work, direct links to generated pull requests, failure details, and downloadable JSON verification reports. Reports are also available from `GET /v1/jobs/:id/report`; the endpoint returns `409` until evidence exists and preserves the same tenant ownership rules as job lookup.
+
+### Blocker decisions and safe continuation
+
+Migration jobs no longer have to fail just because a source library has no direct equivalent. Before local execution, the service detects catalogued incompatibilities and moves the job to `awaiting-decision`. The dashboard explains the affected library, ranks a recommended replacement and alternatives, shows risk and automation support, and offers compatibility, skip, or custom-instruction paths where appropriate.
+
+Users can approve every recommended option in one action or select each resolution independently. `POST /v1/jobs/:id/decisions` validates that every blocker was resolved, records the actor, timestamp, selection, and optional instructions, then safely re-queues the same job. Resolutions are included in the migration report and audit trail. Outbound webhooks include `migration.awaiting-decision` and `migration.resumed` so external systems can request approval without polling.
+
+```bash
+curl -X POST http://127.0.0.1:8787/v1/jobs/JOB_ID/decisions \
+  -H 'Authorization: Bearer ru_live_...' \
+  -H 'Content-Type: application/json' \
+  -d '{"mode":"recommended"}'
+```
+
+### Paid SaaS plans and large repositories
+
+Repo Upgrader has no free migration trial. It applies resource envelopes at admission time so one tenant cannot exhaust shared workers or storage. Prepaid credits, monthly job quotas, migration targets, concurrent jobs, upload size, expanded archive size, project file count, and report-retention duration are returned by `GET /v1/usage` and enforced by the service.
+
+| Plan | Price | Capacity | Concurrent | Upload | Project files | Expanded project | Retention |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Single | $10 once | 1 credit | 1 | 100 MB | 10,000 | 500 MB | 7 days |
+| Team | $50/month | 50/month | 3 | 250 MB | 50,000 | 2 GB | 30 days |
+| Business | $80/month | 200/month | 8 | 500 MB | 250,000 | 10 GB | 90 days |
+| Enterprise | Custom | Custom | 16+ | 500 MB+ | 250,000+ | 10 GB+ | 90+ days |
+
+Uploaded request bodies are streamed into private temporary files and removed after transformation, avoiding a second in-memory copy of large archives. Archive paths, file count, and expanded byte totals are validated before transformation. For very large repositories, the preferred production path is the GitHub App: disposable workers clone directly into isolated workspaces, store reports in S3-compatible object storage, and deliver a branch and PR without uploading a repository through the web process.
+
+Production scale uses PostgreSQL for durable tenant/job state, Redis visibility leases for retryable distributed work, multiple isolated worker replicas, and S3-compatible report storage. `MODERNIZER_CONCURRENCY` remains a per-worker safety ceiling; SaaS plan concurrency is enforced separately during job admission.
+
+Single, Team, and Business purchases use `POST /v1/billing/checkout`. Stripe price identifiers are selected exclusively from `STRIPE_SINGLE_PRICE_ID`, `STRIPE_TEAM_PRICE_ID`, and `STRIPE_BUSINESS_PRICE_ID` on the server. Single uses one-time Checkout; Team and Business use subscriptions. Checkout sessions and subscription metadata bind payment to the authenticated account. Signed Stripe webhooks are the authority that grants credits or activates/removes subscription entitlements. Existing subscribers manage billing through `POST /v1/billing/portal`.
 
 ### CRA compatibility recipes
 
@@ -343,6 +374,12 @@ Version 2.1 supports PostgreSQL job persistence and Redis-backed distributed exe
 
 Version 2.2 adds tenant roles, GitHub App onboarding, Stripe customer-portal handoff, a published OpenAPI contract, a JavaScript SDK, and hosted CLI commands. Roles follow least privilege: viewers inspect results, operators submit and cancel migrations, admins manage credentials and integrations, owners additionally manage billing, and the bootstrap platform administrator can support all tenants. Tenant admins remain scoped to their own account.
 
+The platform administrator also has a private Owner Controls section in the dashboard. It can switch new unpaid customers between paid-only access, free access for selected account IDs, or free access for everyone, using either Team or Business capacity. Existing paying customers retain their purchased plan. Settings are stored in `.modernizer-service/platform-config.json` with owner-only file permissions and the API rejects every non-platform-admin caller.
+
+The same owner console includes a ten-point production launch gate covering durable storage, queueing, report evidence, GitHub delivery, Stripe, HTTPS, worker isolation, customer support, and legal identity. The service must report 100% before public payments are enabled operationally. Customer-facing `/terms`, `/privacy`, and `/refunds` pages document the baseline policies; have qualified counsel adapt the liability, governing-law, data-transfer, tax, and consumer-rights clauses for the operating business before launch.
+
+Successful migrations can create anonymized LinkedIn and X drafts in the private marketing queue. The default is `draft-only`; `approval-required` lets the platform administrator mark drafts approved. External publishing is intentionally not enabled until the relevant social account, OAuth access, and provider credentials are configured, so installing or deploying the product can never post publicly by surprise.
+
 Configure `GITHUB_APP_SLUG`, `MODERNIZER_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY`, and `MODERNIZER_DASHBOARD_URL`. An admin can call `GET /v1/integrations/github` for a short-lived, account-bound GitHub installation URL. An owner can call `POST /v1/billing/portal` to open Stripe's hosted portal when the billing webhook has associated a customer with the account. These endpoints create secure handoffs; they do not require payment or GitHub credentials in the browser.
 
 The machine-readable API contract is available without authentication at `/openapi.json`. The package also exports `RepoUpgraderClient` from `sdk/index.js`:
@@ -376,7 +413,7 @@ The public demo serves a ready-to-use workflow at `/github-actions.yml`. Save it
 
 The dashboard also accepts a single React project ZIP up to 20 MB compressed, 50 MB uncompressed, and 2,000 files. The public service validates every archive path, extracts into a disposable workspace, scans and transforms without installing dependencies or executing project scripts, embeds `repo-upgrader-report.json`, returns a migrated ZIP, and deletes the workspace. This is intentionally marked `transformed-unverified`; run the included project locally or use the GitHub Actions path for full build, test, and lint verification.
 
-Run `npm run benchmark` to exercise a deterministic 100-component CRA fixture with a five-second scan, plan, and transform budget. Tagged releases named `repo-upgrader-v*` run tests, lint, build, benchmark, and package inspection; then publish npm provenance when `NPM_TOKEN` is configured and an immutable container to GitHub Container Registry. See `SECURITY.md` for disclosure and release requirements. Creating a version tag is intentionally a maintainer action because it publishes external artifacts.
+Run `npm run test:saas` for the focused authentication, payment, credit-ledger, tenant-isolation, quota, upload, and API contract matrix. Run `npm run verify` for the complete tests, syntax checks, build, production dependency audit, and deterministic 100-component performance budget. Pull requests execute both the full suite and focused SaaS matrix, audit production dependencies, and enforce the benchmark before merge. Tagged releases named `repo-upgrader-v*` additionally inspect the package and publish npm provenance and an immutable container when release credentials are configured. See `SECURITY.md` for disclosure and release requirements.
 
 ## Security note
 

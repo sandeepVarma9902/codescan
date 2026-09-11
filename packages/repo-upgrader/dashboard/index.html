@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Repo Upgrader Control Panel</title>
   <link rel="stylesheet" href="/dashboard/styles.css">
+  <link rel="stylesheet" href="/dashboard/decisions.css">
 </head>
 <body>
   <header><div><span class="mark">RU</span><strong>Repo Upgrader</strong></div><span id="connection" class="status">Not connected</span></header>
@@ -24,6 +25,32 @@
         <article><span>Success rate</span><strong id="success-rate">—</strong></article>
         <article><span>Current plan</span><strong id="plan">—</strong></article>
         <article><span>Total migrations</span><strong id="total-count">—</strong></article>
+        <article class="attention"><span>Needs your decision</span><strong id="decision-count">0</strong></article>
+      </section>
+      <section id="owner-console" class="card" hidden>
+        <p class="eyebrow">Private owner controls</p><h2>Choose how the service operates</h2>
+        <p>Only the platform administrator can see or change these settings. Changes apply immediately to new requests.</p>
+        <form id="owner-form">
+          <label>Customer access<select id="access-mode"><option value="paid">Paid only</option><option value="invite-only">Free for selected accounts</option><option value="free">Free for everyone</option></select></label>
+          <label>Free access capacity<select id="complimentary-plan"><option value="team">Team limits</option><option value="business">Business limits</option></select></label>
+          <label>Free account IDs<textarea id="complimentary-accounts" placeholder="account-one, account-two"></textarea></label>
+          <label>Marketing safety<select id="marketing-mode"><option value="draft-only">Create drafts only</option><option value="approval-required">Allow me to approve drafts</option></select></label>
+          <button>Save private settings</button>
+        </form>
+        <p id="owner-message" class="message" role="status"></p>
+        <div><p class="eyebrow">Launch gate</p><h2 id="readiness-score">Checking production readiness…</h2><div id="readiness-checks" class="jobs"></div></div>
+        <hr><div class="section-title"><div><p class="eyebrow">Marketing bot</p><h2>Approval queue</h2></div><button id="marketing-refresh" class="secondary">Refresh</button></div>
+        <form id="marketing-form"><label>Channel<select id="marketing-channel"><option value="linkedin">LinkedIn</option><option value="x">X</option></select></label><label>Post draft<textarea id="marketing-text" maxlength="2800" required placeholder="Write or paste a post idea…"></textarea></label><button>Create draft</button></form>
+        <div id="marketing-campaigns" class="jobs"><p class="empty">No drafts yet.</p></div>
+      </section>
+      <section class="card trial-card">
+        <div><p class="eyebrow">Paid migration service</p><h2>Pay only for the capacity you need</h2><p>There is no free trial. Buy one complete migration or select a monthly team plan. Plan limits protect customer repositories and shared infrastructure.</p></div>
+      </section>
+      <section id="pricing" class="pricing" aria-label="Plans">
+        <article class="card"><p class="eyebrow">Single</p><h2>One migration</h2><strong>$10 one time</strong><p>One prepaid migration of any supported type, with a 100 MB upload allowance.</p><button data-plan="single">Buy one migration</button></article>
+        <article class="card featured"><p class="eyebrow">Team</p><h2>Product teams</h2><strong>$50/month</strong><p>50 migrations, three concurrent jobs, 250 MB uploads, and every migration target.</p><button data-plan="team">Choose Team</button></article>
+        <article class="card"><p class="eyebrow">Business</p><h2>Companies</h2><strong>$80/month</strong><p>200 migrations, eight concurrent jobs, 500 MB uploads, 250,000 files, and 90-day evidence.</p><button data-plan="business">Choose Business</button></article>
+        <article class="card"><p class="eyebrow">Enterprise</p><h2>Regulated organizations</h2><strong>Custom</strong><p>Dedicated workers, private networking, SSO, negotiated limits, support, and longer retention.</p><span class="link" aria-label="Enterprise sales configuration required">Contact sales · coming soon</span></article>
       </section>
       <section class="card">
         <p class="eyebrow">Real repository conversion</p>
@@ -34,7 +61,7 @@
       <section class="card">
         <p class="eyebrow">Upload a project</p>
         <h2>Download a migrated ZIP</h2>
-        <p>Upload one React project as a ZIP. The demo scans and transforms it without executing dependencies or project scripts, then returns the complete migrated project and report.</p>
+        <p>Upload one React project as a ZIP. Your current plan supports compressed projects up to <strong id="upload-limit">20 MB</strong>. The service scans and transforms it without executing project scripts, then returns the complete migrated project and report.</p>
         <form id="upload-form">
           <label>React project ZIP<input id="project-zip" type="file" accept=".zip,application/zip" required></label>
           <label>Modernization target<select id="upload-target"><option value="vite">CRA → Vite</option><option value="nextjs">React → Next.js</option><option value="react-native">React → React Native</option></select></label>
@@ -59,6 +86,7 @@
       </section>
     </div>
   </main>
+  <footer><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/refunds">Refunds</a></footer>
   <dialog id="job-dialog">
     <div class="dialog-head"><div><p class="eyebrow">Migration evidence</p><h2 id="detail-title">Job details</h2></div><button id="close-dialog" class="icon" aria-label="Close">×</button></div>
     <div id="job-detail"></div>

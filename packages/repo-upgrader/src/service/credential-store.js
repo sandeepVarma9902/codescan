@@ -29,7 +29,7 @@ export class CredentialStore {
     return { accountId: credential.accountId, plan, role: credential.role, entitlements: PLANS[plan], credentialId: credential.id };
   }
 
-  async create({ accountId, plan = 'free', role = 'operator', name = 'API key' }) {
+  async create({ accountId, plan = 'unpaid', role = 'operator', name = 'API key' }) {
     validate({ accountId, plan, role, name });
     const secret = `ru_live_${randomBytes(24).toString('base64url')}`;
     const now = new Date().toISOString();

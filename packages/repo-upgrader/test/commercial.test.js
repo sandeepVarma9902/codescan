@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createHmac } from 'node:crypto';
-import { createBillingPortal, githubInstallUrl, requirePermission } from '../src/service/commercial.js';
+import { createBillingPortal, createCheckoutSession, githubInstallUrl, requirePermission } from '../src/service/commercial.js';
 import { JobStore } from '../src/service/job-store.js';
 import { startService } from '../src/service/server.js';
 import { RepoUpgraderClient } from '../sdk/index.js';
@@ -35,17 +35,42 @@ test('billing portal uses Stripe customer and returns its session URL', async ()
   assert.match(received.options.body.toString(), /customer=cus_123/);
 });
 
+test('checkout binds a server-selected Stripe price to the tenant', async () => {
+  let received;
+  const result = await createCheckoutSession({ secretKey: 'sk_test', priceId: 'price_business', plan: 'business', accountId: 'acme', successUrl: 'https://app.example/success', cancelUrl: 'https://app.example/cancel', transport: async (url, options) => {
+    received = { url, options };
+    return { ok: true, json: async () => ({ url: 'https://checkout.example/session' }) };
+  } });
+  const payload = received.options.body.toString();
+  assert.equal(result.url, 'https://checkout.example/session');
+  assert.equal(received.url, 'https://api.stripe.com/v1/checkout/sessions');
+  assert.match(payload, /line_items%5B0%5D%5Bprice%5D=price_business/);
+  assert.match(payload, /client_reference_id=acme/);
+  assert.match(payload, /subscription_data%5Bmetadata%5D%5Bplan%5D=business/);
+});
+
+test('single migration Checkout is a one-time payment', async () => {
+  let payload;
+  await createCheckoutSession({ secretKey: 'sk_test', priceId: 'price_single', plan: 'single', accountId: 'acme', successUrl: 'https://app.example/success', cancelUrl: 'https://app.example/cancel', transport: async (_url, options) => {
+    payload = options.body.toString();
+    return { ok: true, json: async () => ({ url: 'https://checkout.example/single' }) };
+  } });
+  assert.match(payload, /mode=payment/);
+  assert.match(payload, /metadata%5Bplan%5D=single/);
+  assert.doesNotMatch(payload, /subscription_data/);
+});
+
 test('OpenAPI is public and tenant admins remain account scoped', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'repo-upgrader-commercial-'));
   const store = await new JobStore(path.join(root, 'jobs.json')).load();
   await store.create({ accountId: 'other', repositoryPath: root, target: 'vite' });
-  const auth = { authenticate: () => ({ accountId: 'acme', role: 'admin', plan: 'free', entitlements: {} }) };
+  const auth = { authenticate: () => ({ accountId: 'acme', role: 'admin', plan: 'unpaid', entitlements: {} }) };
   const worker = { enqueue() {}, status: () => ({ accepting: true }), shutdown: async () => true };
   const service = await startService({ port: 0, store, auth, worker, accountStoreFile: path.join(root, 'accounts.json'), credentialStoreFile: path.join(root, 'credentials.json'), auditFile: path.join(root, 'audit.jsonl') });
   const base = `http://127.0.0.1:${service.address.port}`;
   try {
     const spec = await (await fetch(`${base}/openapi.json`)).json();
-    assert.equal(spec.info.version, '3.0.0');
+    assert.equal(spec.info.version, '3.1.0');
     const jobs = await (await fetch(`${base}/v1/jobs`, { headers: { authorization: 'Bearer ignored' } })).json();
     assert.deepEqual(jobs.jobs, []);
   } finally { await service.close(); }
@@ -62,6 +87,8 @@ test('JavaScript SDK sends authentication and idempotency headers', async () => 
   assert.equal(received.url, 'https://api.example/v1/jobs');
   assert.equal(received.options.headers.authorization, 'Bearer key');
   assert.equal(received.options.headers['idempotency-key'], 'request-123');
+  await client.checkout('single');
+  assert.equal(received.url, 'https://api.example/v1/billing/checkout');
 });
 
 test('public demo mode needs no secret and never accepts local execution', async () => {

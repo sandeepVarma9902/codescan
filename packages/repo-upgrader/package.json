@@ -1,9 +1,9 @@
 {
   "name": "repo-upgrader",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.750.0",
-    "adm-zip": "^0.6.0",
+    "adm-zip": "^0.6.1",
     "pg": "^8.13.1",
     "redis": "^4.7.0"
   },
@@ -14,9 +14,11 @@
   },
   "scripts": {
     "test": "node --test",
+    "test:saas": "node --test test/auth.test.js test/billing.test.js test/commercial.test.js test/credential-store.test.js test/dashboard.test.js test/saas-plans.test.js test/service.test.js test/upload-migration.test.js test/paid-flow.test.js test/platform-owner.test.js test/launch-readiness.test.js",
     "lint": "node --check bin/repo-upgrader.js && node --check src/*.js src/service/*.js scripts/action-runner.js",
     "build": "node scripts/build.js",
-    "benchmark": "node scripts/benchmark.js"
+    "benchmark": "node scripts/benchmark.js",
+    "verify": "npm test && npm run lint && npm run build && npm audit --omit=dev --workspaces=false && npm run benchmark"
   },
   "engines": {
     "node": ">=18"

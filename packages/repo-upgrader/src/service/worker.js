@@ -1,14 +1,16 @@
 import path from 'node:path';
 import { migrate } from '../migrator.js';
+import { detectDecisionBlockers } from './blocker-decisions.js';
 
 export class JobWorker {
-  constructor({ store, allowedRepositoryRoot, concurrency = 1, githubDelivery = null, webhooks = null, reportStore = null }) {
+  constructor({ store, allowedRepositoryRoot, concurrency = 1, githubDelivery = null, webhooks = null, reportStore = null, marketing = null }) {
     this.store = store;
     this.allowedRoot = allowedRepositoryRoot ? path.resolve(allowedRepositoryRoot) : null;
     this.concurrency = Math.max(1, Math.min(Number(concurrency) || 1, 4));
     this.githubDelivery = githubDelivery;
     this.webhooks = webhooks;
     this.reportStore = reportStore;
+    this.marketing = marketing;
     this.queue = [];
     this.active = 0;
     this.accepting = true;
@@ -47,8 +49,17 @@ export class JobWorker {
       }
       const repositoryPath = path.resolve(job.repositoryPath);
       if (!this.allowedRoot || !isWithin(this.allowedRoot, repositoryPath)) throw new Error('Repository path is outside MODERNIZER_ALLOWED_REPO_ROOT.');
+      if (!job.decisionsApprovedAt) {
+        const blockers = await detectDecisionBlockers(repositoryPath, job.target);
+        if (blockers.length) {
+          await this.update(id, { status: 'awaiting-decision', blockers, message: `${blockers.length} migration decision${blockers.length === 1 ? '' : 's'} require approval.` });
+          return;
+        }
+      }
       await this.update(id, { status: 'running' });
-      const report = await migrate(repositoryPath, { target: job.target, executor: job.executor || 'docker', rollbackOnFailure: true, maxRepairAttempts: job.maxRepairAttempts ?? 1 });
+      const report = await migrate(repositoryPath, { target: job.target, executor: job.executor || 'docker', rollbackOnFailure: true, maxRepairAttempts: job.maxRepairAttempts ?? 1, decisions: job.decisions || [] });
+      report.decisions = job.decisions || [];
+      report.blockers = job.blockers || [];
       const reportRef = this.reportStore ? await this.reportStore.put(job.accountId || 'default', id, report) : null;
       await this.update(id, { status: report.status === 'succeeded' ? 'succeeded' : 'failed', ...(reportRef ? { reportRef, reportSummary: { status: report.status, checks: report.verification?.length || report.checks?.length || 0 } } : { report }) });
     } catch (error) {
@@ -58,7 +69,8 @@ export class JobWorker {
 
   async update(id, patch) {
     const job = await this.store.update(id, patch);
-    if (this.webhooks && ['running', 'succeeded', 'failed'].includes(job.status)) await this.webhooks.dispatch(`migration.${job.status}`, job);
+    if (this.webhooks && ['awaiting-decision', 'running', 'succeeded', 'failed'].includes(job.status)) await this.webhooks.dispatch(`migration.${job.status}`, job);
+    if (job.status === 'succeeded' && this.marketing) await this.marketing.onMigrationSucceeded(job);
     return job;
   }
 

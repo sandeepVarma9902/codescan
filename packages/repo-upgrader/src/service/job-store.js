@@ -84,7 +84,7 @@ export class JobStore {
   async cancel(id) {
     const job = this.jobs.get(id);
     if (!job) return null;
-    if (!['queued', 'awaiting-github-app'].includes(job.status)) throw new Error(`Job cannot be cancelled from status ${job.status}.`);
+    if (!['queued', 'awaiting-decision', 'awaiting-github-app'].includes(job.status)) throw new Error(`Job cannot be cancelled from status ${job.status}.`);
     return this.update(id, { status: 'cancelled' });
   }
 
@@ -111,7 +111,8 @@ export class JobStore {
 }
 
 const TRANSITIONS = {
-  queued: ['running', 'awaiting-github-app', 'cancelled', 'failed'],
+  queued: ['running', 'awaiting-decision', 'awaiting-github-app', 'cancelled', 'failed'],
+  'awaiting-decision': ['queued', 'cancelled', 'failed'],
   'awaiting-github-app': ['queued', 'cancelled', 'failed'],
   running: ['succeeded', 'failed', 'interrupted'],
   interrupted: ['queued', 'failed'],
