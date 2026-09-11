@@ -3,13 +3,14 @@ import { migrate } from '../migrator.js';
 import { detectDecisionBlockers } from './blocker-decisions.js';
 
 export class JobWorker {
-  constructor({ store, allowedRepositoryRoot, concurrency = 1, githubDelivery = null, webhooks = null, reportStore = null }) {
+  constructor({ store, allowedRepositoryRoot, concurrency = 1, githubDelivery = null, webhooks = null, reportStore = null, marketing = null }) {
     this.store = store;
     this.allowedRoot = allowedRepositoryRoot ? path.resolve(allowedRepositoryRoot) : null;
     this.concurrency = Math.max(1, Math.min(Number(concurrency) || 1, 4));
     this.githubDelivery = githubDelivery;
     this.webhooks = webhooks;
     this.reportStore = reportStore;
+    this.marketing = marketing;
     this.queue = [];
     this.active = 0;
     this.accepting = true;
@@ -69,6 +70,7 @@ export class JobWorker {
   async update(id, patch) {
     const job = await this.store.update(id, patch);
     if (this.webhooks && ['awaiting-decision', 'running', 'succeeded', 'failed'].includes(job.status)) await this.webhooks.dispatch(`migration.${job.status}`, job);
+    if (job.status === 'succeeded' && this.marketing) await this.marketing.onMigrationSucceeded(job);
     return job;
   }
 

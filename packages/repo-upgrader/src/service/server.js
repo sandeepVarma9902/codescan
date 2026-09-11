@@ -23,6 +23,8 @@ import { createObjectReportStore } from './report-store.js';
 import { createBillingPortal, createCheckoutSession, githubInstallUrl, requirePermission } from './commercial.js';
 import { migrateUploadedZip } from './upload-migration.js';
 import { recommendedResolutions, resolveBlockers } from './blocker-decisions.js';
+import { PlatformConfig } from './platform-config.js';
+import { MarketingStore } from './marketing-store.js';
 
 const DASHBOARD_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../dashboard');
 const OPENAPI_FILE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../openapi.json');
@@ -31,8 +33,10 @@ const ACTION_WORKFLOW_FILE = path.resolve(path.dirname(fileURLToPath(import.meta
 export async function startService(options = {}) {
   const demoMode = options.demoMode ?? process.env.MODERNIZER_DEMO_MODE === 'true';
   const accountStore = options.accountStore || await new AccountStore(options.accountStoreFile || path.resolve('.modernizer-service/accounts.json')).load();
+  const platformConfig = options.platformConfig || await new PlatformConfig(options.platformConfigFile || path.resolve('.modernizer-service/platform-config.json')).load();
+  const marketing = options.marketing || await new MarketingStore(options.marketingFile || path.resolve('.modernizer-service/marketing.json'), { platformConfig }).load();
   const policies = options.policyRegistry || PolicyRegistry.fromEnvironment(options);
-  const planResolver = (accountId, fallback) => accountStore.getPlan(accountId, fallback);
+  const planResolver = (accountId, fallback) => platformConfig.resolvePlan(accountId, accountStore.getPlan(accountId, fallback));
   const credentialStore = options.credentialStore || await new CredentialStore(options.credentialStoreFile || path.resolve('.modernizer-service/credentials.json'), { planResolver }).load();
   const auditLog = options.auditLog || await new AuditLog(options.auditFile || path.resolve('.modernizer-service/audit.jsonl')).load();
   const webhooks = options.webhooks || WebhookDispatcher.fromEnvironment({ ...options, auditLog });
@@ -41,11 +45,11 @@ export async function startService(options = {}) {
   const store = options.store || database?.store || await new JobStore(options.storeFile || path.resolve('.modernizer-service/jobs.json')).load();
   const githubDelivery = options.githubDelivery || createGitHubDelivery(options);
   const reportStore = options.reportStore || ((options.reportBucket || process.env.MODERNIZER_REPORT_BUCKET) ? await createObjectReportStore({ bucket: options.reportBucket, endpoint: options.s3Endpoint }) : null);
-  const runner = new JobWorker({ store, githubDelivery, webhooks, reportStore, allowedRepositoryRoot: options.allowedRepositoryRoot ?? process.env.MODERNIZER_ALLOWED_REPO_ROOT, concurrency: options.concurrency ?? process.env.MODERNIZER_CONCURRENCY });
+  const runner = new JobWorker({ store, githubDelivery, webhooks, reportStore, marketing, allowedRepositoryRoot: options.allowedRepositoryRoot ?? process.env.MODERNIZER_ALLOWED_REPO_ROOT, concurrency: options.concurrency ?? process.env.MODERNIZER_CONCURRENCY });
   const redis = !options.worker && (options.redisUrl || process.env.REDIS_URL) ? await createRedisJobQueue(options.redisUrl || process.env.REDIS_URL) : null;
   const worker = options.worker || (redis ? new DistributedWorker({ queue: redis.queue, runner, concurrency: options.concurrency ?? process.env.MODERNIZER_CONCURRENCY }).start() : runner);
   if (!options.worker && !redis) await worker.resumeQueued();
-  const server = http.createServer((request, response) => route(request, response, { auth, demoMode, store, worker, accountStore, credentialStore, auditLog, webhooks, reportStore, policies, githubAppSlug: options.githubAppSlug ?? process.env.GITHUB_APP_SLUG, dashboardUrl: options.dashboardUrl ?? process.env.MODERNIZER_DASHBOARD_URL, stripeSecretKey: options.stripeSecretKey ?? process.env.STRIPE_SECRET_KEY, stripePrices: options.stripePrices || { single: process.env.STRIPE_SINGLE_PRICE_ID, team: process.env.STRIPE_TEAM_PRICE_ID, business: process.env.STRIPE_BUSINESS_PRICE_ID }, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
+  const server = http.createServer((request, response) => route(request, response, { auth, demoMode, store, worker, accountStore, credentialStore, auditLog, webhooks, reportStore, policies, platformConfig, marketing, githubAppSlug: options.githubAppSlug ?? process.env.GITHUB_APP_SLUG, dashboardUrl: options.dashboardUrl ?? process.env.MODERNIZER_DASHBOARD_URL, stripeSecretKey: options.stripeSecretKey ?? process.env.STRIPE_SECRET_KEY, stripePrices: options.stripePrices || { single: process.env.STRIPE_SINGLE_PRICE_ID, team: process.env.STRIPE_TEAM_PRICE_ID, business: process.env.STRIPE_BUSINESS_PRICE_ID }, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
   server.requestTimeout = 30_000;
   server.headersTimeout = 15_000;
   const port = options.port ?? (Number(process.env.MODERNIZER_PORT) || 8787);
@@ -56,7 +60,7 @@ export async function startService(options = {}) {
     await redis?.close(); await database?.close();
     return { drained };
   };
-  return { server, store, worker, accountStore, credentialStore, auditLog, address: server.address(), close };
+  return { server, store, worker, accountStore, credentialStore, auditLog, platformConfig, marketing, address: server.address(), close };
 }
 
 async function route(request, response, context) {
@@ -79,6 +83,12 @@ async function route(request, response, context) {
     if (request.method === 'POST' && request.url === '/webhooks/billing') return billingWebhook(request, response, context);
     const principal = context.auth.authenticate(request.headers.authorization);
     if (!principal) return json(response, 401, { error: 'unauthorized' });
+    if (request.method === 'GET' && request.url === '/v1/platform/config') { requirePlatformAdmin(principal); return json(response, 200, context.platformConfig.get()); }
+    if (request.method === 'PATCH' && request.url === '/v1/platform/config') { requirePlatformAdmin(principal); const updated = await context.platformConfig.update(await body(request)); await audit(context, principal, 'platform.config-updated', 'platform', 'global', updated); return json(response, 200, updated); }
+    if (request.method === 'GET' && request.url === '/v1/marketing/campaigns') { requirePlatformAdmin(principal); return json(response, 200, { campaigns: context.marketing.list() }); }
+    if (request.method === 'POST' && request.url === '/v1/marketing/campaigns') { requirePlatformAdmin(principal); const campaign = await context.marketing.create(await body(request)); await audit(context, principal, 'marketing.draft-created', 'campaign', campaign.id, { channel: campaign.channel }); return json(response, 201, campaign); }
+    const approveCampaign = request.method === 'POST' && request.url?.match(/^\/v1\/marketing\/campaigns\/([a-f0-9-]+)\/approve$/i);
+    if (approveCampaign) { requirePlatformAdmin(principal); const campaign = await context.marketing.approve(approveCampaign[1]); if (!campaign) return json(response, 404, { error: 'not_found' }); await audit(context, principal, 'marketing.draft-approved', 'campaign', campaign.id, { channel: campaign.channel }); return json(response, 200, campaign); }
     if (request.method === 'POST' && request.url?.startsWith('/v1/upload-migrations')) {
       requirePermission(principal, 'submit');
       if (request.headers['content-type'] !== 'application/zip') throw Object.assign(new Error('Content-Type must be application/zip.'), { statusCode: 415 });
@@ -151,7 +161,7 @@ async function route(request, response, context) {
       return json(response, 200, { jobs: await context.store.list({ status: url.searchParams.get('status') || undefined, limit: url.searchParams.get('limit'), accountId: scope(principal) }) });
     }
     if (request.method === 'GET' && request.url === '/v1/jobs') return json(response, 200, { jobs: await context.store.list({ accountId: scope(principal) }) });
-    if (request.method === 'GET' && request.url === '/v1/usage') { const account=context.accountStore.get(principal.accountId); return json(response, 200, { plan: principal.plan, entitlements: principal.entitlements, migrationCredits:account?.migrationCredits||0, ...await context.store.usage(scope(principal)) }); }
+    if (request.method === 'GET' && request.url === '/v1/usage') { const account=context.accountStore.get(principal.accountId); return json(response, 200, { plan: principal.plan, role: principal.role, entitlements: principal.entitlements, migrationCredits:account?.migrationCredits||0, ...await context.store.usage(scope(principal)) }); }
     if (request.method === 'GET' && request.url === '/v1/analytics') return json(response, 200, await context.store.analytics(scope(principal)));
     const cancel = request.method === 'DELETE' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)$/i);
     if (cancel) { requirePermission(principal, 'cancel'); const existing = await ownedJob(context.store, cancel[1], principal); if (!existing) return json(response, 404, { error: 'not_found' }); const cancelled = await context.store.cancel(cancel[1]); await audit(context, principal, 'migration.cancelled', 'job', cancelled.id, { target: cancelled.target }); await context.webhooks.dispatch('migration.cancelled', cancelled); return json(response, 200, cancelled); }
@@ -211,6 +221,7 @@ function validateJob(input) {
 }
 
 function scope(principal) { return principal.role === 'platform-admin' ? undefined : principal.accountId; }
+function requirePlatformAdmin(principal) { if (principal.role !== 'platform-admin') { const error = new Error('Platform administrator access is required.'); error.statusCode = 403; throw error; } }
 function audit(context, principal, action, resourceType, resourceId, metadata) { return context.auditLog.record({ accountId: principal.accountId, actorId: principal.credentialId || principal.role, action, resourceType, resourceId, metadata }); }
 async function ownedJob(store, id, principal) { const job = await store.get(id); return job && (principal.role === 'platform-admin' || job.accountId === principal.accountId) ? job : null; }
 async function body(request) { return JSON.parse(await rawBody(request)); }

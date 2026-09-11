@@ -374,6 +374,10 @@ Version 2.1 supports PostgreSQL job persistence and Redis-backed distributed exe
 
 Version 2.2 adds tenant roles, GitHub App onboarding, Stripe customer-portal handoff, a published OpenAPI contract, a JavaScript SDK, and hosted CLI commands. Roles follow least privilege: viewers inspect results, operators submit and cancel migrations, admins manage credentials and integrations, owners additionally manage billing, and the bootstrap platform administrator can support all tenants. Tenant admins remain scoped to their own account.
 
+The platform administrator also has a private Owner Controls section in the dashboard. It can switch new unpaid customers between paid-only access, free access for selected account IDs, or free access for everyone, using either Team or Business capacity. Existing paying customers retain their purchased plan. Settings are stored in `.modernizer-service/platform-config.json` with owner-only file permissions and the API rejects every non-platform-admin caller.
+
+Successful migrations can create anonymized LinkedIn and X drafts in the private marketing queue. The default is `draft-only`; `approval-required` lets the platform administrator mark drafts approved. External publishing is intentionally not enabled until the relevant social account, OAuth access, and provider credentials are configured, so installing or deploying the product can never post publicly by surprise.
+
 Configure `GITHUB_APP_SLUG`, `MODERNIZER_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY`, and `MODERNIZER_DASHBOARD_URL`. An admin can call `GET /v1/integrations/github` for a short-lived, account-bound GitHub installation URL. An owner can call `POST /v1/billing/portal` to open Stripe's hosted portal when the billing webhook has associated a customer with the account. These endpoints create secure handoffs; they do not require payment or GitHub credentials in the browser.
 
 The machine-readable API contract is available without authentication at `/openapi.json`. The package also exports `RepoUpgraderClient` from `sdk/index.js`:
