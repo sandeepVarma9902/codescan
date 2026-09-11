@@ -14,7 +14,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "test:saas": "node --test test/auth.test.js test/billing.test.js test/commercial.test.js test/credential-store.test.js test/dashboard.test.js test/saas-plans.test.js test/service.test.js test/upload-migration.test.js test/paid-flow.test.js test/platform-owner.test.js",
+    "test:saas": "node --test test/auth.test.js test/billing.test.js test/commercial.test.js test/credential-store.test.js test/dashboard.test.js test/saas-plans.test.js test/service.test.js test/upload-migration.test.js test/paid-flow.test.js test/platform-owner.test.js test/launch-readiness.test.js",
     "lint": "node --check bin/repo-upgrader.js && node --check src/*.js src/service/*.js scripts/action-runner.js",
     "build": "node scripts/build.js",
     "benchmark": "node scripts/benchmark.js",

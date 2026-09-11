@@ -38,6 +38,7 @@
           <button>Save private settings</button>
         </form>
         <p id="owner-message" class="message" role="status"></p>
+        <div><p class="eyebrow">Launch gate</p><h2 id="readiness-score">Checking production readiness…</h2><div id="readiness-checks" class="jobs"></div></div>
         <hr><div class="section-title"><div><p class="eyebrow">Marketing bot</p><h2>Approval queue</h2></div><button id="marketing-refresh" class="secondary">Refresh</button></div>
         <form id="marketing-form"><label>Channel<select id="marketing-channel"><option value="linkedin">LinkedIn</option><option value="x">X</option></select></label><label>Post draft<textarea id="marketing-text" maxlength="2800" required placeholder="Write or paste a post idea…"></textarea></label><button>Create draft</button></form>
         <div id="marketing-campaigns" class="jobs"><p class="empty">No drafts yet.</p></div>
@@ -85,6 +86,7 @@
       </section>
     </div>
   </main>
+  <footer><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/refunds">Refunds</a></footer>
   <dialog id="job-dialog">
     <div class="dialog-head"><div><p class="eyebrow">Migration evidence</p><h2 id="detail-title">Job details</h2></div><button id="close-dialog" class="icon" aria-label="Close">×</button></div>
     <div id="job-detail"></div>

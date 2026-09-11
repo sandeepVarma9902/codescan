@@ -25,6 +25,7 @@ import { migrateUploadedZip } from './upload-migration.js';
 import { recommendedResolutions, resolveBlockers } from './blocker-decisions.js';
 import { PlatformConfig } from './platform-config.js';
 import { MarketingStore } from './marketing-store.js';
+import { launchReadiness } from './launch-readiness.js';
 
 const DASHBOARD_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../dashboard');
 const OPENAPI_FILE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../openapi.json');
@@ -67,6 +68,9 @@ async function route(request, response, context) {
   try {
     if (request.method === 'GET' && request.url === '/healthz') return json(response, 200, { status: 'ok', service: 'repo-upgrader', version: '3.1.0' });
     if (request.method === 'GET' && ['/dashboard', '/dashboard/'].includes(request.url)) return asset(response, 'index.html', 'text/html; charset=utf-8');
+    if (request.method === 'GET' && request.url === '/terms') return asset(response, 'terms.html', 'text/html; charset=utf-8');
+    if (request.method === 'GET' && request.url === '/privacy') return asset(response, 'privacy.html', 'text/html; charset=utf-8');
+    if (request.method === 'GET' && request.url === '/refunds') return asset(response, 'refunds.html', 'text/html; charset=utf-8');
     if (request.method === 'GET' && request.url === '/dashboard/app.js') return asset(response, 'app.js', 'text/javascript; charset=utf-8');
     if (request.method === 'GET' && request.url === '/dashboard/styles.css') return asset(response, 'styles.css', 'text/css; charset=utf-8');
     if (request.method === 'GET' && request.url === '/dashboard/decisions.css') return asset(response, 'decisions.css', 'text/css; charset=utf-8');
@@ -84,6 +88,7 @@ async function route(request, response, context) {
     const principal = context.auth.authenticate(request.headers.authorization);
     if (!principal) return json(response, 401, { error: 'unauthorized' });
     if (request.method === 'GET' && request.url === '/v1/platform/config') { requirePlatformAdmin(principal); return json(response, 200, context.platformConfig.get()); }
+    if (request.method === 'GET' && request.url === '/v1/platform/readiness') { requirePlatformAdmin(principal); return json(response, 200, launchReadiness({ demoMode: context.demoMode })); }
     if (request.method === 'PATCH' && request.url === '/v1/platform/config') { requirePlatformAdmin(principal); const updated = await context.platformConfig.update(await body(request)); await audit(context, principal, 'platform.config-updated', 'platform', 'global', updated); return json(response, 200, updated); }
     if (request.method === 'GET' && request.url === '/v1/marketing/campaigns') { requirePlatformAdmin(principal); return json(response, 200, { campaigns: context.marketing.list() }); }
     if (request.method === 'POST' && request.url === '/v1/marketing/campaigns') { requirePlatformAdmin(principal); const campaign = await context.marketing.create(await body(request)); await audit(context, principal, 'marketing.draft-created', 'campaign', campaign.id, { channel: campaign.channel }); return json(response, 201, campaign); }

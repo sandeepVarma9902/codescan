@@ -38,6 +38,9 @@
     "/v1/integrations/github": { "get": { "responses": { "200": { "description": "Signed GitHub App installation URL" } } } },
     "/v1/billing/checkout": { "post": { "summary": "Create a server-priced Single, Team, or Business Stripe Checkout session", "responses": { "201": { "description": "Checkout URL" }, "400": { "description": "Unsupported or unconfigured plan" } } } },
     "/v1/billing/portal": { "post": { "responses": { "200": { "description": "Billing portal URL" } } } }
+    ,"/v1/platform/config": { "get": { "summary": "Read platform-admin-only commercial controls", "responses": { "200": { "description": "Platform configuration" }, "403": { "description": "Platform administrator required" } } }, "patch": { "summary": "Change paid, free, invite-only, and marketing modes", "responses": { "200": { "description": "Updated platform configuration" }, "403": { "description": "Platform administrator required" } } } }
+    ,"/v1/platform/readiness": { "get": { "summary": "Evaluate production launch configuration", "responses": { "200": { "description": "Launch gate and missing actions" }, "403": { "description": "Platform administrator required" } } } }
+    ,"/v1/marketing/campaigns": { "get": { "summary": "List private marketing drafts", "responses": { "200": { "description": "Marketing drafts" } } }, "post": { "summary": "Create a private marketing draft", "responses": { "201": { "description": "Draft created" } } } }
   },
   "components": {
     "securitySchemes": { "bearerAuth": { "type": "http", "scheme": "bearer" } },
