@@ -1,5 +1,11 @@
 .metrics { grid-template-columns: repeat(5, 1fr); }
 .attention { background: #fff7df !important; color: #805d00 !important; }
+.trial-card { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 24px; margin-bottom: 22px; }
+.trial-card p { margin: 6px 0 0; }
+.pricing { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 22px; }
+.pricing article { padding: 24px; }
+.pricing article > strong { display: block; margin-top: 12px; font-size: 18px; }
+.pricing .featured { border-color: #6ba684; box-shadow: 0 18px 55px #1f58321a; }
 .badge.awaiting-decision { background: #fff1c2; color: #765700; }
 .decision-panel { margin: 22px 0; padding: 18px; border: 1px solid #eed68c; border-radius: 16px; background: #fffaf0; }
 .decision-intro { display: flex; gap: 12px; align-items: flex-start; }
@@ -19,5 +25,5 @@
 .instructions { display: grid; gap: 6px; margin-top: 12px; font-size: 12px; font-weight: 700; }
 .instructions textarea { min-height: 70px; resize: vertical; border: 1px solid #ccd3cd; border-radius: 10px; padding: 10px; font: inherit; }
 .decision-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
-@media (max-width: 900px) { .metrics { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 900px) { .metrics { grid-template-columns: 1fr 1fr; } .trial-card { align-items: stretch; flex-direction: column; } .pricing { grid-template-columns: 1fr; } }
 @media (max-width: 480px) { .decision-actions { align-items: stretch; flex-direction: column; } }

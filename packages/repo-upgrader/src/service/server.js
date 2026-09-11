@@ -5,7 +5,7 @@ import { JobWorker } from './worker.js';
 import { jobFromGitHubDispatch, verifyGitHubSignature } from './github-webhook.js';
 import { GitHubAppClient } from './github-app.js';
 import { GitHubDelivery } from './github-delivery.js';
-import { ApiKeyRegistry, assertEntitled } from './auth.js';
+import { ApiKeyRegistry, assertEntitled, PLANS } from './auth.js';
 import { AccountStore } from './account-store.js';
 import { billingUpdateFromEvent, verifyBillingSignature } from './billing-webhook.js';
 import { assertPolicy, PolicyRegistry } from './policy.js';
@@ -13,13 +13,14 @@ import { CompositeAuth, CredentialStore } from './credential-store.js';
 import { AuditLog } from './audit-log.js';
 import { WebhookDispatcher } from './outbound-webhook.js';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createPostgresJobStore } from './postgres-job-store.js';
 import { createRedisJobQueue } from './redis-job-queue.js';
 import { DistributedWorker } from './distributed-worker.js';
 import { prometheusMetrics } from './metrics.js';
 import { createObjectReportStore } from './report-store.js';
-import { createBillingPortal, githubInstallUrl, requirePermission } from './commercial.js';
+import { createBillingPortal, createCheckoutSession, githubInstallUrl, requirePermission } from './commercial.js';
 import { migrateUploadedZip } from './upload-migration.js';
 import { recommendedResolutions, resolveBlockers } from './blocker-decisions.js';
 
@@ -35,7 +36,7 @@ export async function startService(options = {}) {
   const credentialStore = options.credentialStore || await new CredentialStore(options.credentialStoreFile || path.resolve('.modernizer-service/credentials.json'), { planResolver }).load();
   const auditLog = options.auditLog || await new AuditLog(options.auditFile || path.resolve('.modernizer-service/audit.jsonl')).load();
   const webhooks = options.webhooks || WebhookDispatcher.fromEnvironment({ ...options, auditLog });
-  const auth = options.auth || (demoMode ? { authenticate: () => ({ accountId: 'public-demo', plan: 'pro', role: 'operator', entitlements: { monthlyJobs: 100, targets: ['vite', 'nextjs', 'react-native'] } }) } : new CompositeAuth(ApiKeyRegistry.fromEnvironment({ ...options, planResolver }), credentialStore));
+  const auth = options.auth || (demoMode ? { authenticate: () => ({ accountId: 'public-demo', plan: 'pro', role: 'operator', entitlements: PLANS.pro }) } : new CompositeAuth(ApiKeyRegistry.fromEnvironment({ ...options, planResolver }), credentialStore));
   const database = !options.store && (options.databaseUrl || process.env.DATABASE_URL) ? await createPostgresJobStore(options.databaseUrl || process.env.DATABASE_URL) : null;
   const store = options.store || database?.store || await new JobStore(options.storeFile || path.resolve('.modernizer-service/jobs.json')).load();
   const githubDelivery = options.githubDelivery || createGitHubDelivery(options);
@@ -44,7 +45,7 @@ export async function startService(options = {}) {
   const redis = !options.worker && (options.redisUrl || process.env.REDIS_URL) ? await createRedisJobQueue(options.redisUrl || process.env.REDIS_URL) : null;
   const worker = options.worker || (redis ? new DistributedWorker({ queue: redis.queue, runner, concurrency: options.concurrency ?? process.env.MODERNIZER_CONCURRENCY }).start() : runner);
   if (!options.worker && !redis) await worker.resumeQueued();
-  const server = http.createServer((request, response) => route(request, response, { auth, demoMode, store, worker, accountStore, credentialStore, auditLog, webhooks, reportStore, policies, githubAppSlug: options.githubAppSlug ?? process.env.GITHUB_APP_SLUG, dashboardUrl: options.dashboardUrl ?? process.env.MODERNIZER_DASHBOARD_URL, stripeSecretKey: options.stripeSecretKey ?? process.env.STRIPE_SECRET_KEY, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
+  const server = http.createServer((request, response) => route(request, response, { auth, demoMode, store, worker, accountStore, credentialStore, auditLog, webhooks, reportStore, policies, githubAppSlug: options.githubAppSlug ?? process.env.GITHUB_APP_SLUG, dashboardUrl: options.dashboardUrl ?? process.env.MODERNIZER_DASHBOARD_URL, stripeSecretKey: options.stripeSecretKey ?? process.env.STRIPE_SECRET_KEY, stripePrices: options.stripePrices || { starter: process.env.STRIPE_STARTER_PRICE_ID, pro: process.env.STRIPE_PRO_PRICE_ID }, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
   server.requestTimeout = 30_000;
   server.headersTimeout = 15_000;
   const port = options.port ?? (Number(process.env.MODERNIZER_PORT) || 8787);
@@ -82,12 +83,18 @@ async function route(request, response, context) {
       requirePermission(principal, 'submit');
       if (request.headers['content-type'] !== 'application/zip') throw Object.assign(new Error('Content-Type must be application/zip.'), { statusCode: 415 });
       const url = new URL(request.url, 'http://service');
-      const result = await migrateUploadedZip(await rawBody(request, 20 * 1024 * 1024), url.searchParams.get('target') || 'vite');
+      const limits = principal.entitlements;
+      const upload = await requestFile(request, limits.maxUploadBytes);
+      let result;
+      try { result = await migrateUploadedZip(upload.file, url.searchParams.get('target') || 'vite', limits); }
+      finally { await upload.remove(); }
       response.writeHead(200, { 'content-type': 'application/zip', 'content-disposition': `attachment; filename="${result.filename}"`, 'content-length': result.buffer.length, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-repo-upgrader-status': result.report.status });
       return response.end(result.buffer);
     }
     if (request.method === 'GET' && request.url === '/v1/integrations/github') { requirePermission(principal,'integrations'); const installUrl=githubInstallUrl({slug:context.githubAppSlug,accountId:principal.accountId,secret:context.webhookSecret}); return installUrl?json(response,200,{installUrl}):json(response,503,{error:'github_app_not_configured'}); }
+    if (request.method === 'POST' && request.url === '/v1/account/trial') { requirePermission(principal,'submit'); const account=await context.accountStore.startTrial(principal.accountId); await audit(context,principal,'trial.started','account',principal.accountId,{trialEndsAt:account.trialEndsAt}); return json(response,201,{account,entitlements:PLANS.trial}); }
     if (request.method === 'POST' && request.url === '/v1/billing/portal') { requirePermission(principal,'billing'); const account=context.accountStore.get(principal.accountId); const result=await createBillingPortal({secretKey:context.stripeSecretKey,customerId:account?.customerId,returnUrl:context.dashboardUrl||'http://127.0.0.1:8787/dashboard'}); return json(response,200,result); }
+    if (request.method === 'POST' && request.url === '/v1/billing/checkout') { requirePermission(principal,'billing'); const input=await body(request); if(!['starter','pro'].includes(input.plan)){const error=new Error('Checkout plan must be starter or pro.');error.statusCode=400;throw error;} const account=context.accountStore.get(principal.accountId);const dashboard=context.dashboardUrl||'http://127.0.0.1:8787/dashboard';const result=await createCheckoutSession({secretKey:context.stripeSecretKey,priceId:context.stripePrices[input.plan],accountId:principal.accountId,customerId:account?.customerId,successUrl:`${dashboard}?checkout=success`,cancelUrl:`${dashboard}?checkout=cancelled`});await audit(context,principal,'checkout.created','account',principal.accountId,{plan:input.plan});return json(response,201,result); }
     if (request.method === 'POST' && request.url === '/v1/api-keys') {
       requirePermission(principal, 'credentials');
       const input = await body(request);
@@ -132,7 +139,7 @@ async function route(request, response, context) {
       return json(response, 200, { jobs: await context.store.list({ status: url.searchParams.get('status') || undefined, limit: url.searchParams.get('limit'), accountId: scope(principal) }) });
     }
     if (request.method === 'GET' && request.url === '/v1/jobs') return json(response, 200, { jobs: await context.store.list({ accountId: scope(principal) }) });
-    if (request.method === 'GET' && request.url === '/v1/usage') return json(response, 200, { plan: principal.plan, entitlements: principal.entitlements, ...await context.store.usage(scope(principal)) });
+    if (request.method === 'GET' && request.url === '/v1/usage') { const account=context.accountStore.get(principal.accountId); return json(response, 200, { plan: principal.plan, entitlements: principal.entitlements, trialEndsAt:account?.trialEndsAt||null, ...await context.store.usage(scope(principal)) }); }
     if (request.method === 'GET' && request.url === '/v1/analytics') return json(response, 200, await context.store.analytics(scope(principal)));
     const cancel = request.method === 'DELETE' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)$/i);
     if (cancel) { requirePermission(principal, 'cancel'); const existing = await ownedJob(context.store, cancel[1], principal); if (!existing) return json(response, 404, { error: 'not_found' }); const cancelled = await context.store.cancel(cancel[1]); await audit(context, principal, 'migration.cancelled', 'job', cancelled.id, { target: cancelled.target }); await context.webhooks.dispatch('migration.cancelled', cancelled); return json(response, 200, cancelled); }
@@ -196,6 +203,23 @@ function audit(context, principal, action, resourceType, resourceId, metadata) {
 async function ownedJob(store, id, principal) { const job = await store.get(id); return job && (principal.role === 'platform-admin' || job.accountId === principal.accountId) ? job : null; }
 async function body(request) { return JSON.parse(await rawBody(request)); }
 async function rawBody(request, limit = 1024 * 1024) { const chunks = []; let size = 0; for await (const chunk of request) { size += chunk.length; if (size > limit) { const error = new Error('Payload too large.'); error.statusCode = 413; throw error; } chunks.push(chunk); } return Buffer.concat(chunks); }
+async function requestFile(request, limit) {
+  const declaredSize = Number(request.headers['content-length']);
+  if (Number.isFinite(declaredSize) && declaredSize > limit) { const error = new Error(`Payload exceeds the ${Math.round(limit / 1024 / 1024)} MB plan limit.`); error.statusCode = 413; throw error; }
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'repo-upgrader-request-'));
+  const file = path.join(directory, 'project.zip');
+  const handle = await fs.open(file, 'wx', 0o600);
+  let size = 0;
+  try {
+    for await (const chunk of request) {
+      size += chunk.length;
+      if (size > limit) { const error = new Error(`Payload exceeds the ${Math.round(limit / 1024 / 1024)} MB plan limit.`); error.statusCode = 413; throw error; }
+      await handle.write(chunk);
+    }
+  } catch (error) { await handle.close(); await fs.rm(directory, { recursive: true, force: true }); throw error; }
+  await handle.close();
+  return { file, size, remove: () => fs.rm(directory, { recursive: true, force: true }) };
+}
 function json(response, status, value) { response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); response.end(`${JSON.stringify(value)}\n`); }
 async function asset(response, file, contentType) { const value = await fs.readFile(path.join(DASHBOARD_ROOT, file)); response.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); response.end(value); }
 

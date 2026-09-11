@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createHmac } from 'node:crypto';
-import { createBillingPortal, githubInstallUrl, requirePermission } from '../src/service/commercial.js';
+import { createBillingPortal, createCheckoutSession, githubInstallUrl, requirePermission } from '../src/service/commercial.js';
 import { JobStore } from '../src/service/job-store.js';
 import { startService } from '../src/service/server.js';
 import { RepoUpgraderClient } from '../sdk/index.js';
@@ -35,6 +35,20 @@ test('billing portal uses Stripe customer and returns its session URL', async ()
   assert.match(received.options.body.toString(), /customer=cus_123/);
 });
 
+test('checkout binds a server-selected Stripe price to the tenant', async () => {
+  let received;
+  const result = await createCheckoutSession({ secretKey: 'sk_test', priceId: 'price_pro', accountId: 'acme', successUrl: 'https://app.example/success', cancelUrl: 'https://app.example/cancel', transport: async (url, options) => {
+    received = { url, options };
+    return { ok: true, json: async () => ({ url: 'https://checkout.example/session' }) };
+  } });
+  const payload = received.options.body.toString();
+  assert.equal(result.url, 'https://checkout.example/session');
+  assert.equal(received.url, 'https://api.stripe.com/v1/checkout/sessions');
+  assert.match(payload, /line_items%5B0%5D%5Bprice%5D=price_pro/);
+  assert.match(payload, /client_reference_id=acme/);
+  assert.doesNotMatch(payload, /price.*starter/);
+});
+
 test('OpenAPI is public and tenant admins remain account scoped', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'repo-upgrader-commercial-'));
   const store = await new JobStore(path.join(root, 'jobs.json')).load();
@@ -62,6 +76,8 @@ test('JavaScript SDK sends authentication and idempotency headers', async () => 
   assert.equal(received.url, 'https://api.example/v1/jobs');
   assert.equal(received.options.headers.authorization, 'Bearer key');
   assert.equal(received.options.headers['idempotency-key'], 'request-123');
+  await client.startTrial();
+  assert.equal(received.url, 'https://api.example/v1/account/trial');
 });
 
 test('public demo mode needs no secret and never accepts local execution', async () => {

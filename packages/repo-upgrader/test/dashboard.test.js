@@ -58,3 +58,21 @@ test('blocker decisions are tenant scoped, audited, and resume the job', async (
   assert.equal(service.auditLog.list({accountId:'tenant-a'})[0].action,'migration.decisions-approved');
   await service.close();
 });
+
+test('free accounts can activate one trial and receive expanded limits', async () => {
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'repo-upgrader-trial-api-'));
+  const accountStore=await new (await import('../src/service/account-store.js')).AccountStore(path.join(root,'accounts.json')).load();
+  const store=await new JobStore(path.join(root,'jobs.json')).load();
+  const options={apiKeys:[{key:'rk_trial_dashboard_12345',accountId:'trial-tenant',plan:'free'}],accountStore,port:0,store,worker:{enqueue(){},shutdown:async()=>true},auditFile:path.join(root,'audit.jsonl')};
+  const service=await startService(options);
+  const base=`http://127.0.0.1:${service.address.port}`;
+  const headers={authorization:'Bearer rk_trial_dashboard_12345'};
+  const activated=await fetch(`${base}/v1/account/trial`,{method:'POST',headers});
+  assert.equal(activated.status,201);
+  assert.equal((await activated.json()).account.plan,'trial');
+  const usage=await (await fetch(`${base}/v1/usage`,{headers})).json();
+  assert.equal(usage.plan,'trial');
+  assert.equal(usage.entitlements.maxUploadBytes,100*1024*1024);
+  assert.equal((await fetch(`${base}/v1/account/trial`,{method:'POST',headers})).status,409);
+  await service.close();
+});

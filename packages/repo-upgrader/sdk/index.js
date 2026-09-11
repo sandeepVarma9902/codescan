@@ -7,4 +7,7 @@ export class RepoUpgraderClient{
  cancel(id){return this.request(`/v1/jobs/${encodeURIComponent(id)}`,{method:'DELETE'});}
  usage(){return this.request('/v1/usage');}analytics(){return this.request('/v1/analytics');}
  report(id){return this.request(`/v1/jobs/${encodeURIComponent(id)}/report`);}
+ decisions(id,input){return this.request(`/v1/jobs/${encodeURIComponent(id)}/decisions`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(input)});}
+ startTrial(){return this.request('/v1/account/trial',{method:'POST'});}
+ checkout(plan){return this.request('/v1/billing/checkout',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({plan})});}
 }

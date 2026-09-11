@@ -21,7 +21,9 @@ export class AccountStore {
   }
 
   getPlan(accountId, fallback = 'free') {
-    return this.accounts.get(accountId)?.plan || fallback;
+    const account = this.accounts.get(accountId);
+    if (account?.plan === 'trial' && account.trialEndsAt && Date.now() >= new Date(account.trialEndsAt).getTime()) return 'free';
+    return account?.plan || fallback;
   }
   get(accountId) { const account = this.accounts.get(accountId); return account ? structuredClone(account) : null; }
 
@@ -29,15 +31,29 @@ export class AccountStore {
     return this.events.has(eventId);
   }
 
+  async startTrial(accountId, { days = PLANS.trial.trialDays } = {}) {
+    const existing = this.accounts.get(accountId);
+    if (existing?.trialStartedAt || existing?.plan === 'trial') throw httpError(409, 'The free trial has already been used for this account.');
+    if (existing && !['free'].includes(existing.plan) && ['active', 'trialing'].includes(existing.status)) throw httpError(409, 'Paid accounts cannot replace their subscription with a free trial.');
+    const startedAt = new Date();
+    const account = { ...existing, accountId, plan: 'trial', status: 'trialing', trialStartedAt: startedAt.toISOString(), trialEndsAt: new Date(startedAt.getTime() + days * 86400000).toISOString(), updatedAt: startedAt.toISOString() };
+    this.accounts.set(accountId, account);
+    await this.persist();
+    return structuredClone(account);
+  }
+
   async apply({ eventId, accountId, plan, customerId, subscriptionId, status }) {
     if (!eventId || !accountId || !PLANS[plan]) throw new Error('Invalid billing account update.');
     if (this.events.has(eventId)) return { account: this.accounts.get(accountId), deduplicated: true };
+    const previous = this.accounts.get(accountId);
     const account = {
       accountId,
       plan,
       customerId: customerId || null,
       subscriptionId: subscriptionId || null,
       status: status || 'active',
+      trialStartedAt: previous?.trialStartedAt || null,
+      trialEndsAt: previous?.trialEndsAt || null,
       updatedAt: new Date().toISOString()
     };
     this.accounts.set(accountId, account);
@@ -54,3 +70,4 @@ export class AccountStore {
     await fs.rename(temporary, this.file);
   }
 }
+function httpError(statusCode, message) { const error = new Error(message); error.statusCode = statusCode; return error; }

@@ -1,10 +1,11 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 export const PLANS = {
-  free: { monthlyJobs: 3, targets: ['vite'] },
-  starter: { monthlyJobs: 25, targets: ['vite', 'nextjs'] },
-  pro: { monthlyJobs: 100, targets: ['vite', 'nextjs', 'react-native'] },
-  enterprise: { monthlyJobs: Infinity, targets: ['vite', 'nextjs', 'react-native'] }
+  free: plan(3, ['vite'], 20, 2_000, 50, 1, 1),
+  trial: plan(5, ['vite', 'nextjs', 'react-native'], 100, 10_000, 500, 1, 7, { trialDays: 14 }),
+  starter: plan(25, ['vite', 'nextjs'], 100, 10_000, 500, 2, 14),
+  pro: plan(100, ['vite', 'nextjs', 'react-native'], 250, 50_000, 2_000, 4, 30),
+  enterprise: plan(Infinity, ['vite', 'nextjs', 'react-native'], 500, 250_000, 10_000, 16, 90)
 };
 
 export class ApiKeyRegistry {
@@ -34,8 +35,11 @@ export class ApiKeyRegistry {
 }
 
 export function assertEntitled(principal, target, usage) {
+  if (principal.plan === 'trial' && principal.trialEndsAt && Date.now() >= new Date(principal.trialEndsAt).getTime()) throw httpError(402, 'Your free trial has expired. Choose a paid plan to continue migrating repositories.');
   if (!principal.entitlements.targets.includes(target)) throw httpError(403, `The ${principal.plan} plan does not include ${target} migrations.`);
   if (usage.periodJobs >= principal.entitlements.monthlyJobs) throw httpError(429, `Monthly migration quota reached for the ${principal.plan} plan.`);
+  const active = (usage.byStatus?.queued || 0) + (usage.byStatus?.running || 0);
+  if (active >= principal.entitlements.maxConcurrentJobs) throw httpError(429, `Concurrent migration limit reached for the ${principal.plan} plan.`);
 }
 
 function validateEntry(entry) {
@@ -46,3 +50,6 @@ function validateEntry(entry) {
 }
 function digest(value) { return createHash('sha256').update(value).digest(); }
 function httpError(statusCode, message) { const error = new Error(message); error.statusCode = statusCode; return error; }
+function plan(monthlyJobs, targets, maxUploadMb, maxProjectFiles, maxExpandedMb, maxConcurrentJobs, retentionDays, extra = {}) {
+  return { monthlyJobs, targets, maxUploadBytes: maxUploadMb * 1024 * 1024, maxProjectFiles, maxExpandedBytes: maxExpandedMb * 1024 * 1024, maxConcurrentJobs, retentionDays, ...extra };
+}

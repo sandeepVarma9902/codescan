@@ -291,6 +291,24 @@ curl -X POST http://127.0.0.1:8787/v1/jobs/JOB_ID/decisions \
   -d '{"mode":"recommended"}'
 ```
 
+### SaaS plans, trials, and large repositories
+
+Repo Upgrader applies resource envelopes at admission time so one tenant cannot exhaust shared workers or storage. Accounts can activate one durable 14-day trial with `POST /v1/account/trial`; a trial cannot be restarted after expiry. Monthly job quotas, migration targets, concurrent jobs, upload size, expanded archive size, project file count, and report-retention duration are returned by `GET /v1/usage` and enforced by the service.
+
+| Plan | Jobs/month | Concurrent | Upload | Project files | Expanded project | Retention |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Free | 3 | 1 | 20 MB | 2,000 | 50 MB | 1 day |
+| 14-day trial | 5 | 1 | 100 MB | 10,000 | 500 MB | 7 days |
+| Starter | 25 | 2 | 100 MB | 10,000 | 500 MB | 14 days |
+| Pro | 100 | 4 | 250 MB | 50,000 | 2 GB | 30 days |
+| Enterprise | Unlimited | 16 | 500 MB | 250,000 | 10 GB | 90 days |
+
+Uploaded request bodies are streamed into private temporary files and removed after transformation, avoiding a second in-memory copy of large archives. Archive paths, file count, and expanded byte totals are validated before transformation. For very large repositories, the preferred production path is the GitHub App: disposable workers clone directly into isolated workspaces, store reports in S3-compatible object storage, and deliver a branch and PR without uploading a repository through the web process.
+
+Production scale uses PostgreSQL for durable tenant/job state, Redis visibility leases for retryable distributed work, multiple isolated worker replicas, and S3-compatible report storage. `MODERNIZER_CONCURRENCY` remains a per-worker safety ceiling; SaaS plan concurrency is enforced separately during job admission.
+
+Starter and Pro upgrades use `POST /v1/billing/checkout`. Stripe price identifiers are selected exclusively from `STRIPE_STARTER_PRICE_ID` and `STRIPE_PRO_PRICE_ID` on the server, and Checkout sessions bind the subscription to the authenticated account. Stripe subscription webhooks remain the authority that activates or removes paid entitlements. Existing customers manage subscriptions through `POST /v1/billing/portal`.
+
 ### CRA compatibility recipes
 
 Version 2.0 deepens the deterministic CRA → Vite pack. The scanner inventories TypeScript/JavaScript `paths`, CRA `ReactComponent` SVG imports, and conventional `setupProxy.js` routes. The transformer preserves aliases through `vite-tsconfig-paths`, converts SVG imports to `vite-plugin-svgr`'s `?react` contract, and translates recognized proxy routes into Vite `server.proxy` entries while retaining the source proxy file as migration evidence. Unrecognized proxy middleware and service-worker behavior remain visible for manual review rather than being silently discarded.

@@ -27,6 +27,15 @@
         <article><span>Total migrations</span><strong id="total-count">—</strong></article>
         <article class="attention"><span>Needs your decision</span><strong id="decision-count">0</strong></article>
       </section>
+      <section class="card trial-card">
+        <div><p class="eyebrow">SaaS access</p><h2>Scale when your repositories grow</h2><p>Plan limits protect shared infrastructure while enterprise projects receive larger uploads, more files, parallel workers, and longer report retention. <span id="trial-status"></span></p></div>
+        <button id="trial-button">Start 14-day free trial</button>
+      </section>
+      <section id="pricing" class="pricing" aria-label="Plans">
+        <article class="card"><p class="eyebrow">Starter</p><h2>Growing projects</h2><strong>25 migrations/month</strong><p>100 MB uploads, two concurrent jobs, CRA → Vite and React → Next.js.</p><button data-plan="starter">Choose Starter</button></article>
+        <article class="card featured"><p class="eyebrow">Pro</p><h2>Product teams</h2><strong>100 migrations/month</strong><p>250 MB uploads, four concurrent jobs, and React Native conversions.</p><button data-plan="pro">Choose Pro</button></article>
+        <article class="card"><p class="eyebrow">Enterprise</p><h2>Large organizations</h2><strong>Custom volume</strong><p>500 MB uploads, 250,000 files, distributed workers, policies, and extended retention.</p><span class="link" aria-label="Enterprise sales configuration required">Contact sales · coming soon</span></article>
+      </section>
       <section class="card">
         <p class="eyebrow">Real repository conversion</p>
         <h2>Run safely with GitHub Actions</h2>
@@ -36,7 +45,7 @@
       <section class="card">
         <p class="eyebrow">Upload a project</p>
         <h2>Download a migrated ZIP</h2>
-        <p>Upload one React project as a ZIP. The demo scans and transforms it without executing dependencies or project scripts, then returns the complete migrated project and report.</p>
+        <p>Upload one React project as a ZIP. Your current plan supports compressed projects up to <strong id="upload-limit">20 MB</strong>. The service scans and transforms it without executing project scripts, then returns the complete migrated project and report.</p>
         <form id="upload-form">
           <label>React project ZIP<input id="project-zip" type="file" accept=".zip,application/zip" required></label>
           <label>Modernization target<select id="upload-target"><option value="vite">CRA → Vite</option><option value="nextjs">React → Next.js</option><option value="react-native">React → React Native</option></select></label>

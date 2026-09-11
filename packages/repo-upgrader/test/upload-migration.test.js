@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import AdmZip from 'adm-zip';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { migrateUploadedZip } from '../src/service/upload-migration.js';
 
 function craZip(prefix = 'project/') {
@@ -25,4 +28,16 @@ test('uploaded ZIP must contain exactly one project', async () => {
   const zip = craZip('one/');
   zip.addFile('two/package.json', Buffer.from('{"name":"second"}'));
   await assert.rejects(migrateUploadedZip(zip.toBuffer(), 'vite'), /exactly one React project/);
+});
+
+test('large upload path input is supported without buffering the HTTP request', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'repo-upgrader-upload-file-'));
+  const file = path.join(directory, 'project.zip');
+  await fs.writeFile(file, craZip().toBuffer());
+  const result = await migrateUploadedZip(file, 'vite', { maxProjectFiles: 10, maxExpandedBytes: 1024 * 1024 });
+  assert.equal(result.report.status, 'transformed-unverified');
+});
+
+test('plan file-count limits stop archive expansion', async () => {
+  await assert.rejects(() => migrateUploadedZip(craZip().toBuffer(), 'vite', { maxProjectFiles: 2, maxExpandedBytes: 1024 * 1024 }), /more than 2 entries/);
 });

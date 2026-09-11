@@ -8,23 +8,24 @@ import { transformCraToVite } from '../transform.js';
 import { transformReactToNext } from '../nextjs-transform.js';
 import { transformReactToNative } from '../react-native-transform.js';
 
-const MAX_FILES = 2_000;
-const MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
+const DEFAULT_LIMITS = { maxProjectFiles: 2_000, maxExpandedBytes: 50 * 1024 * 1024 };
 
-export async function migrateUploadedZip(input, target) {
+export async function migrateUploadedZip(input, target, limits = DEFAULT_LIMITS) {
   if (!['vite', 'nextjs', 'react-native'].includes(target)) throw httpError(400, 'target must be vite, nextjs, or react-native.');
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'repo-upgrader-upload-'));
   try {
     const zip = new AdmZip(input);
     const entries = zip.getEntries();
-    if (entries.length > MAX_FILES) throw httpError(413, `ZIP contains more than ${MAX_FILES} entries.`);
+    const maxFiles = positiveLimit(limits.maxProjectFiles, DEFAULT_LIMITS.maxProjectFiles);
+    const maxExpandedBytes = positiveLimit(limits.maxExpandedBytes, DEFAULT_LIMITS.maxExpandedBytes);
+    if (entries.length > maxFiles) throw httpError(413, `ZIP contains more than ${maxFiles} entries for this plan.`);
     let total = 0;
     for (const entry of entries) {
       const relative = safeEntry(entry.entryName);
       if (entry.isDirectory) continue;
       const data = entry.getData();
       total += data.length;
-      if (total > MAX_UNCOMPRESSED_BYTES) throw httpError(413, 'Uncompressed project exceeds 50 MB.');
+      if (total > maxExpandedBytes) throw httpError(413, `Expanded project exceeds ${formatMb(maxExpandedBytes)} MB for this plan.`);
       const destination = path.join(workspace, relative);
       await fs.mkdir(path.dirname(destination), { recursive: true });
       await fs.writeFile(destination, data, { mode: 0o600 });
@@ -64,3 +65,5 @@ async function findProjectRoot(workspace) {
 }
 function safeName(value) { return String(value || 'migrated-project').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-|-$/g, '') || 'migrated-project'; }
 function httpError(statusCode, message) { const error = new Error(message); error.statusCode = statusCode; return error; }
+function positiveLimit(value, fallback) { return Number.isFinite(value) && value > 0 ? value : fallback; }
+function formatMb(bytes) { return Math.round(bytes / 1024 / 1024); }
