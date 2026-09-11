@@ -33,11 +33,10 @@
         "responses": { "200": { "description": "Migrated project ZIP" }, "413": { "description": "Plan upload, file-count, or expanded-size limit exceeded" }, "422": { "description": "No safe migration recipe" } }
       }
     },
-    "/v1/account/trial": { "post": { "summary": "Start the account's one-time 14-day free trial", "responses": { "201": { "description": "Trial activated" }, "409": { "description": "Trial already used" } } } },
-    "/v1/usage": { "get": { "responses": { "200": { "description": "Usage, plan resource envelope, and trial expiry" } } } },
+    "/v1/usage": { "get": { "responses": { "200": { "description": "Usage, prepaid credits, and plan resource envelope" } } } },
     "/v1/analytics": { "get": { "responses": { "200": { "description": "Migration analytics" } } } },
     "/v1/integrations/github": { "get": { "responses": { "200": { "description": "Signed GitHub App installation URL" } } } },
-    "/v1/billing/checkout": { "post": { "summary": "Create a server-priced Starter or Pro Stripe Checkout session", "responses": { "201": { "description": "Checkout URL" }, "400": { "description": "Unsupported or unconfigured plan" } } } },
+    "/v1/billing/checkout": { "post": { "summary": "Create a server-priced Single, Team, or Business Stripe Checkout session", "responses": { "201": { "description": "Checkout URL" }, "400": { "description": "Unsupported or unconfigured plan" } } } },
     "/v1/billing/portal": { "post": { "responses": { "200": { "description": "Billing portal URL" } } } }
   },
   "components": {

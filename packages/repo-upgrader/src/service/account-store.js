@@ -7,6 +7,7 @@ export class AccountStore {
     this.file = file;
     this.accounts = new Map();
     this.events = new Set();
+    this.creditDebits = new Set();
   }
 
   async load() {
@@ -14,46 +15,47 @@ export class AccountStore {
       const data = JSON.parse(await fs.readFile(this.file, 'utf8'));
       for (const account of data.accounts || []) this.accounts.set(account.accountId, account);
       for (const eventId of data.events || []) this.events.add(eventId);
+      for (const reference of data.creditDebits || []) this.creditDebits.add(reference);
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }
     return this;
   }
 
-  getPlan(accountId, fallback = 'free') {
-    const account = this.accounts.get(accountId);
-    if (account?.plan === 'trial' && account.trialEndsAt && Date.now() >= new Date(account.trialEndsAt).getTime()) return 'free';
-    return account?.plan || fallback;
-  }
+  getPlan(accountId, fallback = 'unpaid') { const account = this.accounts.get(accountId); return account?.plan === 'unpaid' && account.migrationCredits > 0 ? 'single' : account?.plan || fallback; }
   get(accountId) { const account = this.accounts.get(accountId); return account ? structuredClone(account) : null; }
+  hasConsumedCredit(accountId, reference) { return this.creditDebits.has(`${accountId}:${reference}`); }
 
   hasEvent(eventId) {
     return this.events.has(eventId);
   }
 
-  async startTrial(accountId, { days = PLANS.trial.trialDays } = {}) {
-    const existing = this.accounts.get(accountId);
-    if (existing?.trialStartedAt || existing?.plan === 'trial') throw httpError(409, 'The free trial has already been used for this account.');
-    if (existing && !['free'].includes(existing.plan) && ['active', 'trialing'].includes(existing.status)) throw httpError(409, 'Paid accounts cannot replace their subscription with a free trial.');
-    const startedAt = new Date();
-    const account = { ...existing, accountId, plan: 'trial', status: 'trialing', trialStartedAt: startedAt.toISOString(), trialEndsAt: new Date(startedAt.getTime() + days * 86400000).toISOString(), updatedAt: startedAt.toISOString() };
-    this.accounts.set(accountId, account);
+  async consumeCredit(accountId, reference) {
+    if (!reference) throw new Error('A credit consumption reference is required.');
+    const ledgerKey = `${accountId}:${reference}`;
+    if (this.creditDebits.has(ledgerKey)) return this.get(accountId);
+    const account = this.accounts.get(accountId);
+    if (!account || !(account.migrationCredits > 0)) throw httpError(402, 'No prepaid migration credits remain.');
+    const next = { ...account, migrationCredits: account.migrationCredits - 1, updatedAt: new Date().toISOString() };
+    this.accounts.set(accountId, next);
+    this.creditDebits.add(ledgerKey);
     await this.persist();
-    return structuredClone(account);
+    return structuredClone(next);
   }
 
-  async apply({ eventId, accountId, plan, customerId, subscriptionId, status }) {
+  async apply({ eventId, accountId, plan, customerId, subscriptionId, status, creditDelta = 0 }) {
     if (!eventId || !accountId || !PLANS[plan]) throw new Error('Invalid billing account update.');
     if (this.events.has(eventId)) return { account: this.accounts.get(accountId), deduplicated: true };
     const previous = this.accounts.get(accountId);
+    creditDelta = Number(creditDelta || 0);
+    const effectivePlan = creditDelta > 0 && ['team', 'business', 'enterprise'].includes(previous?.plan) ? previous.plan : plan;
     const account = {
       accountId,
-      plan,
+      plan: effectivePlan,
       customerId: customerId || null,
       subscriptionId: subscriptionId || null,
       status: status || 'active',
-      trialStartedAt: previous?.trialStartedAt || null,
-      trialEndsAt: previous?.trialEndsAt || null,
+      migrationCredits: Math.max(0, Number(previous?.migrationCredits || 0) + creditDelta),
       updatedAt: new Date().toISOString()
     };
     this.accounts.set(accountId, account);
@@ -65,7 +67,7 @@ export class AccountStore {
   async persist() {
     await fs.mkdir(path.dirname(this.file), { recursive: true, mode: 0o700 });
     const temporary = `${this.file}.${process.pid}.tmp`;
-    const value = `${JSON.stringify({ version: 1, accounts: [...this.accounts.values()], events: [...this.events] }, null, 2)}\n`;
+    const value = `${JSON.stringify({ version: 2, accounts: [...this.accounts.values()], events: [...this.events], creditDebits: [...this.creditDebits] }, null, 2)}\n`;
     await fs.writeFile(temporary, value, { mode: 0o600 });
     await fs.rename(temporary, this.file);
   }

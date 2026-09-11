@@ -36,7 +36,7 @@ export async function startService(options = {}) {
   const credentialStore = options.credentialStore || await new CredentialStore(options.credentialStoreFile || path.resolve('.modernizer-service/credentials.json'), { planResolver }).load();
   const auditLog = options.auditLog || await new AuditLog(options.auditFile || path.resolve('.modernizer-service/audit.jsonl')).load();
   const webhooks = options.webhooks || WebhookDispatcher.fromEnvironment({ ...options, auditLog });
-  const auth = options.auth || (demoMode ? { authenticate: () => ({ accountId: 'public-demo', plan: 'pro', role: 'operator', entitlements: PLANS.pro }) } : new CompositeAuth(ApiKeyRegistry.fromEnvironment({ ...options, planResolver }), credentialStore));
+  const auth = options.auth || (demoMode ? { authenticate: () => ({ accountId: 'public-demo', plan: 'business', role: 'operator', entitlements: PLANS.business }) } : new CompositeAuth(ApiKeyRegistry.fromEnvironment({ ...options, planResolver }), credentialStore));
   const database = !options.store && (options.databaseUrl || process.env.DATABASE_URL) ? await createPostgresJobStore(options.databaseUrl || process.env.DATABASE_URL) : null;
   const store = options.store || database?.store || await new JobStore(options.storeFile || path.resolve('.modernizer-service/jobs.json')).load();
   const githubDelivery = options.githubDelivery || createGitHubDelivery(options);
@@ -45,7 +45,7 @@ export async function startService(options = {}) {
   const redis = !options.worker && (options.redisUrl || process.env.REDIS_URL) ? await createRedisJobQueue(options.redisUrl || process.env.REDIS_URL) : null;
   const worker = options.worker || (redis ? new DistributedWorker({ queue: redis.queue, runner, concurrency: options.concurrency ?? process.env.MODERNIZER_CONCURRENCY }).start() : runner);
   if (!options.worker && !redis) await worker.resumeQueued();
-  const server = http.createServer((request, response) => route(request, response, { auth, demoMode, store, worker, accountStore, credentialStore, auditLog, webhooks, reportStore, policies, githubAppSlug: options.githubAppSlug ?? process.env.GITHUB_APP_SLUG, dashboardUrl: options.dashboardUrl ?? process.env.MODERNIZER_DASHBOARD_URL, stripeSecretKey: options.stripeSecretKey ?? process.env.STRIPE_SECRET_KEY, stripePrices: options.stripePrices || { starter: process.env.STRIPE_STARTER_PRICE_ID, pro: process.env.STRIPE_PRO_PRICE_ID }, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
+  const server = http.createServer((request, response) => route(request, response, { auth, demoMode, store, worker, accountStore, credentialStore, auditLog, webhooks, reportStore, policies, githubAppSlug: options.githubAppSlug ?? process.env.GITHUB_APP_SLUG, dashboardUrl: options.dashboardUrl ?? process.env.MODERNIZER_DASHBOARD_URL, stripeSecretKey: options.stripeSecretKey ?? process.env.STRIPE_SECRET_KEY, stripePrices: options.stripePrices || { single: process.env.STRIPE_SINGLE_PRICE_ID, team: process.env.STRIPE_TEAM_PRICE_ID, business: process.env.STRIPE_BUSINESS_PRICE_ID }, webhookSecret: options.webhookSecret ?? process.env.MODERNIZER_WEBHOOK_SECRET, billingSecret: options.billingSecret ?? process.env.MODERNIZER_BILLING_WEBHOOK_SECRET }));
   server.requestTimeout = 30_000;
   server.headersTimeout = 15_000;
   const port = options.port ?? (Number(process.env.MODERNIZER_PORT) || 8787);
@@ -83,18 +83,25 @@ async function route(request, response, context) {
       requirePermission(principal, 'submit');
       if (request.headers['content-type'] !== 'application/zip') throw Object.assign(new Error('Content-Type must be application/zip.'), { statusCode: 415 });
       const url = new URL(request.url, 'http://service');
+      const target = url.searchParams.get('target') || 'vite';
+      const account = context.accountStore.get(principal.accountId);
+      const uploadKey = request.headers['idempotency-key'];
+      if (principal.entitlements.creditBased && !/^[A-Za-z0-9_.:-]{8,128}$/.test(uploadKey || '')) throw new Error('A valid Idempotency-Key is required for single-migration uploads.');
+      const creditReference = `upload:${uploadKey}`;
+      const retryCredit = principal.entitlements.creditBased && context.accountStore.hasConsumedCredit(principal.accountId, creditReference) ? 1 : 0;
+      assertEntitled(principal, target, { ...await context.store.usage(principal.accountId), migrationCredits: (account?.migrationCredits || 0) + retryCredit });
       const limits = principal.entitlements;
       const upload = await requestFile(request, limits.maxUploadBytes);
       let result;
-      try { result = await migrateUploadedZip(upload.file, url.searchParams.get('target') || 'vite', limits); }
+      try { result = await migrateUploadedZip(upload.file, target, limits); }
       finally { await upload.remove(); }
+      if (principal.entitlements.creditBased) await context.accountStore.consumeCredit(principal.accountId, creditReference);
       response.writeHead(200, { 'content-type': 'application/zip', 'content-disposition': `attachment; filename="${result.filename}"`, 'content-length': result.buffer.length, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-repo-upgrader-status': result.report.status });
       return response.end(result.buffer);
     }
     if (request.method === 'GET' && request.url === '/v1/integrations/github') { requirePermission(principal,'integrations'); const installUrl=githubInstallUrl({slug:context.githubAppSlug,accountId:principal.accountId,secret:context.webhookSecret}); return installUrl?json(response,200,{installUrl}):json(response,503,{error:'github_app_not_configured'}); }
-    if (request.method === 'POST' && request.url === '/v1/account/trial') { requirePermission(principal,'submit'); const account=await context.accountStore.startTrial(principal.accountId); await audit(context,principal,'trial.started','account',principal.accountId,{trialEndsAt:account.trialEndsAt}); return json(response,201,{account,entitlements:PLANS.trial}); }
     if (request.method === 'POST' && request.url === '/v1/billing/portal') { requirePermission(principal,'billing'); const account=context.accountStore.get(principal.accountId); const result=await createBillingPortal({secretKey:context.stripeSecretKey,customerId:account?.customerId,returnUrl:context.dashboardUrl||'http://127.0.0.1:8787/dashboard'}); return json(response,200,result); }
-    if (request.method === 'POST' && request.url === '/v1/billing/checkout') { requirePermission(principal,'billing'); const input=await body(request); if(!['starter','pro'].includes(input.plan)){const error=new Error('Checkout plan must be starter or pro.');error.statusCode=400;throw error;} const account=context.accountStore.get(principal.accountId);const dashboard=context.dashboardUrl||'http://127.0.0.1:8787/dashboard';const result=await createCheckoutSession({secretKey:context.stripeSecretKey,priceId:context.stripePrices[input.plan],accountId:principal.accountId,customerId:account?.customerId,successUrl:`${dashboard}?checkout=success`,cancelUrl:`${dashboard}?checkout=cancelled`});await audit(context,principal,'checkout.created','account',principal.accountId,{plan:input.plan});return json(response,201,result); }
+    if (request.method === 'POST' && request.url === '/v1/billing/checkout') { requirePermission(principal,'billing'); const input=await body(request); if(!['single','team','business'].includes(input.plan)){const error=new Error('Checkout plan must be single, team, or business.');error.statusCode=400;throw error;} const account=context.accountStore.get(principal.accountId);const dashboard=context.dashboardUrl||'http://127.0.0.1:8787/dashboard';const result=await createCheckoutSession({secretKey:context.stripeSecretKey,priceId:context.stripePrices[input.plan],plan:input.plan,accountId:principal.accountId,customerId:account?.customerId,successUrl:`${dashboard}?checkout=success`,cancelUrl:`${dashboard}?checkout=cancelled`});await audit(context,principal,'checkout.created','account',principal.accountId,{plan:input.plan});return json(response,201,result); }
     if (request.method === 'POST' && request.url === '/v1/api-keys') {
       requirePermission(principal, 'credentials');
       const input = await body(request);
@@ -124,8 +131,13 @@ async function route(request, response, context) {
       if (idempotencyKey && !/^[A-Za-z0-9_.:-]{8,128}$/.test(idempotencyKey)) throw new Error('Invalid Idempotency-Key.');
       const duplicate = idempotencyKey && await context.store.findByIdempotencyKey(principal.accountId, idempotencyKey);
       if (duplicate) return json(response, 200, { ...duplicate, deduplicated: true });
-      assertEntitled(principal, input.target, await context.store.usage(principal.accountId));
+      const account = context.accountStore.get(principal.accountId);
+      if (principal.entitlements.creditBased && !idempotencyKey) throw new Error('Idempotency-Key is required for single-migration purchases.');
+      const creditReference = `job-request:${idempotencyKey}`;
+      const retryCredit = principal.entitlements.creditBased && context.accountStore.hasConsumedCredit(principal.accountId, creditReference) ? 1 : 0;
+      assertEntitled(principal, input.target, { ...await context.store.usage(principal.accountId), migrationCredits: (account?.migrationCredits || 0) + retryCredit });
       assertPolicy(context.policies.get(principal.accountId), input);
+      if (principal.entitlements.creditBased) await context.accountStore.consumeCredit(principal.accountId, creditReference);
       const result = await context.store.createOrGet({ source: 'api', accountId: principal.accountId, plan: principal.plan, ...input }, idempotencyKey);
       if (result.created) {
         await audit(context, principal, 'migration.submitted', 'job', result.job.id, { target: result.job.target, repository: result.job.repository?.fullName || null });
@@ -139,7 +151,7 @@ async function route(request, response, context) {
       return json(response, 200, { jobs: await context.store.list({ status: url.searchParams.get('status') || undefined, limit: url.searchParams.get('limit'), accountId: scope(principal) }) });
     }
     if (request.method === 'GET' && request.url === '/v1/jobs') return json(response, 200, { jobs: await context.store.list({ accountId: scope(principal) }) });
-    if (request.method === 'GET' && request.url === '/v1/usage') { const account=context.accountStore.get(principal.accountId); return json(response, 200, { plan: principal.plan, entitlements: principal.entitlements, trialEndsAt:account?.trialEndsAt||null, ...await context.store.usage(scope(principal)) }); }
+    if (request.method === 'GET' && request.url === '/v1/usage') { const account=context.accountStore.get(principal.accountId); return json(response, 200, { plan: principal.plan, entitlements: principal.entitlements, migrationCredits:account?.migrationCredits||0, ...await context.store.usage(scope(principal)) }); }
     if (request.method === 'GET' && request.url === '/v1/analytics') return json(response, 200, await context.store.analytics(scope(principal)));
     const cancel = request.method === 'DELETE' && request.url?.match(/^\/v1\/jobs\/([a-f0-9-]+)$/i);
     if (cancel) { requirePermission(principal, 'cancel'); const existing = await ownedJob(context.store, cancel[1], principal); if (!existing) return json(response, 404, { error: 'not_found' }); const cancelled = await context.store.cancel(cancel[1]); await audit(context, principal, 'migration.cancelled', 'job', cancelled.id, { target: cancelled.target }); await context.webhooks.dispatch('migration.cancelled', cancelled); return json(response, 200, cancelled); }

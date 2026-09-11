@@ -39,9 +39,13 @@ jobs:
         run: npm ci --workspaces=false
       - name: Run tests
         run: npm test
+      - name: Run paid SaaS contract matrix
+        run: npm run test:saas
       - name: Run lint
         run: npm run lint
       - name: Build
         run: npm run build
       - name: Audit production dependencies
         run: npm audit --omit=dev --workspaces=false
+      - name: Enforce migration performance budget
+        run: npm run benchmark

@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { PLANS } from './auth.js';
 
-const ACTIVE = new Set(['active', 'trialing', 'past_due']);
+const ACTIVE = new Set(['active', 'past_due']);
 
 export function verifyBillingSignature(raw, header, secret, options = {}) {
   if (!secret || !header) return false;
@@ -18,13 +18,22 @@ export function verifyBillingSignature(raw, header, secret, options = {}) {
 
 export function billingUpdateFromEvent(event) {
   if (!event?.id || !event?.type || !event.data?.object) return null;
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    const accountId = session.metadata?.accountId || session.client_reference_id;
+    if (!accountId) throw new Error('Billing checkout account reference is required.');
+    if (session.metadata?.plan !== 'single') return null;
+    if (session.payment_status !== 'paid') throw new Error('Single migration credit requires a paid Checkout session.');
+    return { eventId: event.id, accountId, plan: 'single', customerId: session.customer, subscriptionId: null, status: 'paid', creditDelta: 1 };
+  }
   if (!['customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted'].includes(event.type)) return null;
   const subscription = event.data.object;
   const accountId = subscription.metadata?.accountId;
   if (!accountId) throw new Error('Billing subscription metadata.accountId is required.');
   const requestedPlan = subscription.metadata?.plan || subscription.items?.data?.[0]?.price?.lookup_key;
   const active = event.type !== 'customer.subscription.deleted' && ACTIVE.has(subscription.status);
-  const plan = active ? requestedPlan : 'free';
+  const plan = active ? requestedPlan : 'unpaid';
+  if (active && !['team', 'business', 'enterprise'].includes(plan)) throw new Error(`Unknown subscription plan: ${plan}`);
   if (!PLANS[plan]) throw new Error(`Unknown billing plan: ${plan}`);
   return {
     eventId: event.id,

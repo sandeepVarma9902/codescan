@@ -26,7 +26,7 @@ test('migration reports require ownership and a completed report', async () => {
   const store=await new JobStore(path.join(root,'jobs.json')).load();
   const pending=await store.create({accountId:'tenant-a',target:'vite'});
   const complete=await store.create({accountId:'tenant-a',target:'vite',report:{status:'succeeded',checks:[{name:'build',status:'passed'}]}});
-  const service=await startService({apiKeys:[{key:'rk_tenant_a_dashboard_123',accountId:'tenant-a',plan:'starter'},{key:'rk_tenant_b_dashboard_123',accountId:'tenant-b',plan:'starter'}],port:0,store,worker:{enqueue(){},shutdown:async()=>true}});
+  const service=await startService({apiKeys:[{key:'rk_tenant_a_dashboard_123',accountId:'tenant-a',plan:'team'},{key:'rk_tenant_b_dashboard_123',accountId:'tenant-b',plan:'team'}],port:0,store,worker:{enqueue(){},shutdown:async()=>true}});
   const base=`http://127.0.0.1:${service.address.port}`;
   const headers={authorization:'Bearer rk_tenant_a_dashboard_123'};
   assert.equal((await fetch(`${base}/v1/jobs/${pending.id}/report`,{headers})).status,409);
@@ -44,7 +44,7 @@ test('blocker decisions are tenant scoped, audited, and resume the job', async (
   const blocker={id:'router-1',category:'library-incompatibility',dependency:'react-router-dom',status:'open',options:[{id:'expo-router',label:'Use Expo Router',kind:'recommended'}]};
   await store.update(queued.id,{status:'awaiting-decision',blockers:[blocker]});
   const enqueued=[];
-  const service=await startService({apiKeys:[{key:'rk_tenant_a_decisions_123',accountId:'tenant-a',plan:'pro'},{key:'rk_tenant_b_decisions_123',accountId:'tenant-b',plan:'pro'}],port:0,store,worker:{enqueue(job){enqueued.push(job);},shutdown:async()=>true},auditFile:path.join(root,'audit.jsonl')});
+  const service=await startService({apiKeys:[{key:'rk_tenant_a_decisions_123',accountId:'tenant-a',plan:'business'},{key:'rk_tenant_b_decisions_123',accountId:'tenant-b',plan:'business'}],port:0,store,worker:{enqueue(job){enqueued.push(job);},shutdown:async()=>true},auditFile:path.join(root,'audit.jsonl')});
   const base=`http://127.0.0.1:${service.address.port}`;
   const denied=await fetch(`${base}/v1/jobs/${queued.id}/decisions`,{method:'POST',headers:{authorization:'Bearer rk_tenant_b_decisions_123','content-type':'application/json'},body:'{"mode":"recommended"}'});
   assert.equal(denied.status,404);
@@ -59,20 +59,18 @@ test('blocker decisions are tenant scoped, audited, and resume the job', async (
   await service.close();
 });
 
-test('free accounts can activate one trial and receive expanded limits', async () => {
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'repo-upgrader-trial-api-'));
+test('unpaid accounts receive no migration capacity', async () => {
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'repo-upgrader-unpaid-api-'));
   const accountStore=await new (await import('../src/service/account-store.js')).AccountStore(path.join(root,'accounts.json')).load();
   const store=await new JobStore(path.join(root,'jobs.json')).load();
-  const options={apiKeys:[{key:'rk_trial_dashboard_12345',accountId:'trial-tenant',plan:'free'}],accountStore,port:0,store,worker:{enqueue(){},shutdown:async()=>true},auditFile:path.join(root,'audit.jsonl')};
+  const options={apiKeys:[{key:'rk_unpaid_dashboard_1234',accountId:'unpaid-tenant',plan:'unpaid'}],accountStore,port:0,store,worker:{enqueue(){},shutdown:async()=>true},auditFile:path.join(root,'audit.jsonl')};
   const service=await startService(options);
   const base=`http://127.0.0.1:${service.address.port}`;
-  const headers={authorization:'Bearer rk_trial_dashboard_12345'};
-  const activated=await fetch(`${base}/v1/account/trial`,{method:'POST',headers});
-  assert.equal(activated.status,201);
-  assert.equal((await activated.json()).account.plan,'trial');
+  const headers={authorization:'Bearer rk_unpaid_dashboard_1234'};
   const usage=await (await fetch(`${base}/v1/usage`,{headers})).json();
-  assert.equal(usage.plan,'trial');
-  assert.equal(usage.entitlements.maxUploadBytes,100*1024*1024);
-  assert.equal((await fetch(`${base}/v1/account/trial`,{method:'POST',headers})).status,409);
+  assert.equal(usage.plan,'unpaid');
+  assert.equal(usage.migrationCredits,0);
+  const migration=await fetch(`${base}/v1/jobs`,{method:'POST',headers:{...headers,'content-type':'application/json'},body:'{"repository":{"fullName":"owner/repo"},"target":"vite"}'});
+  assert.equal(migration.status,402);
   await service.close();
 });
